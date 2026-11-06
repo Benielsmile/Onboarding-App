@@ -1,0 +1,23 @@
+# ==============================================================================
+# NeonDB infrastructure — neon/.gitignore
+# Ce dossier doit rester versionné : migrations SQL + documentation uniquement.
+# Rien de local, rien de secret, rien de généré.
+# ==============================================================================
+
+# --- Secrets & configuration locale (ne JAMAIS committer) ---
+.env
+.env.*
+*.env
+/secrets/
+
+# --- Dumps & backups de base (générés hors git : trop volumineux, sensibles) ---
+dumps/
+*.dump
+*.sql.gz
+backup*.sql
+neon_export_*
+
+# --- Rapports & diagnostics temporaires ---
+*.log
+*.tmp
+diag/
