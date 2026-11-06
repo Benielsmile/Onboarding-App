@@ -17,19 +17,21 @@ import QRCode from 'qrcode';
 import type { Participant } from '../types/index.ts';
 import { 
   generateWhatsAppConfirmationUrl,
-  PIGA_DIRECTION_EMAIL,
-  PIGA_DIRECTION_PHONE_LOCAL
+  resolveMessageInfo,
+  type FormationMessageInfo
 } from './whatsappHelper.ts';
 
 export async function generateTicketPDF(
   participant: Participant,
+  info?: FormationMessageInfo,
   siteUrl: string = typeof window !== 'undefined' ? window.location.origin : 'https://arsenal-agentique.tech'
 ): Promise<jsPDF> {
+  const msg = resolveMessageInfo(info);
   const verificationUrl = participant.cryptoToken
     ? `${siteUrl}/#verify?token=${encodeURIComponent(participant.cryptoToken)}`
     : `${siteUrl}?ticket=${participant.ticketCode}`;
 
-  const { url: whatsAppUrl } = generateWhatsAppConfirmationUrl(participant, siteUrl);
+  const { url: whatsAppUrl } = generateWhatsAppConfirmationUrl(participant, info, siteUrl);
 
   // Generate high-contrast QR code
   const qrCodeDataUrl = await QRCode.toDataURL(verificationUrl, {
@@ -74,7 +76,7 @@ export async function generateTicketPDF(
   doc.setTextColor(255, 255, 255);
   doc.setFontSize(9);
   doc.setFont('helvetica', 'bold');
-  doc.text('ARSENAL AGENTIQUE · ACCRÉDITATION OFFICIELLE', 68, 17);
+  doc.text(`${msg.decorativeName.toUpperCase()} · ACCRÉDITATION OFFICIELLE`.slice(0, 60), 68, 17);
 
   doc.setTextColor(160, 160, 160);
   doc.setFontSize(7.5);
@@ -85,12 +87,12 @@ export async function generateTicketPDF(
   doc.setTextColor(255, 255, 255);
   doc.setFontSize(8);
   doc.setFont('helvetica', 'bold');
-  doc.text('SESSION : VENDREDI 13 NOVEMBRE 2026', pageWidth - 16, 17, { align: 'right' });
+  doc.text(`SESSION : ${msg.dateDisplay.toUpperCase()}`.slice(0, 60), pageWidth - 16, 17, { align: 'right' });
 
   doc.setTextColor(229, 9, 20);
   doc.setFontSize(7.5);
   doc.setFont('helvetica', 'normal');
-  doc.text('KINSHASA & DISTRIBUTED EDGE · NDA SIGNÉ', pageWidth - 16, 22.5, { align: 'right' });
+  doc.text(`${msg.locationDisplay.toUpperCase()} · NDA SIGNÉ`.slice(0, 60), pageWidth - 16, 22.5, { align: 'right' });
 
   // Participant Profile Card
   doc.setTextColor(140, 140, 140);
@@ -117,15 +119,20 @@ export async function generateTicketPDF(
   doc.setTextColor(229, 9, 20);
   doc.setFontSize(7.5);
   doc.setFont('helvetica', 'bold');
-  doc.text('MODULES D\'INGÉNIERIE IA & SÉCURITÉ OFFENSIVE', 20, 67);
+  doc.text('AU PROGRAMME DE LA FORMATION', 20, 67);
 
   doc.setTextColor(180, 180, 180);
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(7.2);
-  doc.text('• Architectures multi-agents autonomes, LangGraph & mémoires cycliques', 20, 73);
-  doc.text('• Sandboxing de Tool-Calling sécurisé & défenses OWASP Top 10 LLMs', 20, 78);
-  doc.text('• Haute concurrence Edge, PostgreSQL RLS & Verrouillage de lignes', 20, 83);
-  doc.text('• Billetterie cryptographique AES-256-GCM & vérification temps réel', 20, 88);
+  const moduleSummaries = (info?.moduleSummaries?.length ? info.moduleSummaries : [
+    '• Architectures multi-agents autonomes, LangGraph & mémoires cycliques',
+    '• Sandboxing de Tool-Calling sécurisé & défenses OWASP Top 10 LLMs',
+    '• Haute concurrence Edge, PostgreSQL RLS & Verrouillage de lignes',
+    '• Billetterie cryptographique AES-256-GCM & vérification temps réel'
+  ]).slice(0, 4);
+  moduleSummaries.forEach((line, i) => {
+    doc.text(line.slice(0, 85), 20, 73 + i * 5);
+  });
 
   // Official Financial Receipt Box (Lower Left)
   doc.setFillColor(15, 15, 15);
@@ -149,7 +156,7 @@ export async function generateTicketPDF(
   doc.setTextColor(255, 255, 255);
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(10);
-  doc.text('$20.00 USD (Payé)', 42, 128);
+  doc.text(`$${(participant.priceUsd ?? 20).toFixed(2)} USD (Payé)`, 42, 128);
 
   // Right Column: Cryptographic QR Code Container
   const qrX = 144;
@@ -199,7 +206,7 @@ export async function generateTicketPDF(
   doc.setTextColor(100, 100, 100);
   doc.setFontSize(6);
   doc.text(
-    `Propriété technologique de PIGA STUDIO · Direction : ${PIGA_DIRECTION_EMAIL} · Tél : ${PIGA_DIRECTION_PHONE_LOCAL} · Sceau GCM : ${participant.cryptoToken?.slice(0, 30) || 'PIGA-SECURE'}...`,
+    `Propriété technologique de PIGA STUDIO · Direction : ${msg.directionEmail} · Tél : ${msg.directionPhone} · Sceau GCM : ${participant.cryptoToken?.slice(0, 30) || 'PIGA-SECURE'}...`,
     16,
     142
   );
@@ -207,8 +214,9 @@ export async function generateTicketPDF(
   return doc;
 }
 
-export async function downloadTicketPDF(participant: Participant, siteUrl?: string): Promise<void> {
-  const doc = await generateTicketPDF(participant, siteUrl);
+export async function downloadTicketPDF(participant: Participant, info?: FormationMessageInfo, siteUrl?: string): Promise<void> {
+  const doc = await generateTicketPDF(participant, info, siteUrl);
   const sanitizedName = participant.fullName.replace(/[^a-zA-Z0-9]/g, '_');
-  doc.save(`Ticket_PIGA_STUDIO_Arsenal_Agentique_${sanitizedName}.pdf`);
+  const sanitizedFormation = (info?.title || 'Formation_PIGA_STUDIO').replace(/[^a-zA-Z0-9]/g, '_').slice(0, 40);
+  doc.save(`Ticket_PIGA_STUDIO_${sanitizedFormation}_${sanitizedName}.pdf`);
 }

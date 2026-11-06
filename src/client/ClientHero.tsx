@@ -2,14 +2,17 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  * 
- * PIGA STUDIO — Dynamic Client Hero Section
- * Fully customizable via Admin Dashboard: Title, Tagline, Date, Pricing, and Media.
- * Dual theme support (Pure White #FFFFFF & Absolute Black #000000).
+ * PIGA STUDIO — Dynamic Client Hero (Premium Edition)
+ * Editorial centered hero inspired by subscrr.app: oversized display
+ * headline, asterisk footnote tagline, pill CTAs, floating glass stat
+ * chips and a large rounded showcase frame. Palette & branding unchanged:
+ * Rouge PIGA #E50914, Noir Absolu, Blanc Pur.
  */
 
 import React from 'react';
-import { ArrowRight, Lock, Calendar, Clock, MapPin } from 'lucide-react';
+import { ArrowRight, Lock, MapPin } from 'lucide-react';
 import type { InventoryStatus, ProgramConfig } from '../types/index.ts';
+import { resolveFormationImageUrl, HERO_IMAGE_FALLBACK } from '../utils/programAssets.ts';
 
 interface ClientHeroProps {
   programConfig: ProgramConfig;
@@ -26,150 +29,145 @@ export const ClientHero: React.FC<ClientHeroProps> = ({
 }) => {
   const isSoldOut = programConfig.status === 'SOLD_OUT';
   const isComingSoon = programConfig.status === 'COMING_SOON';
+  const statistics = [
+    { label: 'Places disponibles', value: `${inventory.availableSeats} / ${programConfig.totalCapacity}` },
+    { label: 'Tarif du billet', value: `$${programConfig.ticketPriceUsd.toFixed(2)}` },
+    { label: 'Orange Money', value: programConfig.orangeMoneyNumber }
+  ];
 
   return (
-    <section className="relative overflow-hidden pt-12 pb-20 border-b border-slate-200 dark:border-[#1E1E1E] bg-white dark:bg-[#000000] transition-colors duration-200">
+    <section className="relative overflow-hidden pt-36 pb-24 sm:pb-28 border-b border-slate-100 dark:border-[#111111] bg-white dark:bg-[#000000] transition-colors duration-200">
       {/* Cinematic Red Ambient Ray */}
       <div 
-        className="absolute top-0 left-1/2 -translate-x-1/2 w-[850px] h-[380px] bg-gradient-to-b from-[#E50914]/10 dark:from-[#E50914]/15 via-[#E50914]/5 to-transparent blur-3xl pointer-events-none -z-10"
+        className="absolute top-0 left-1/2 -translate-x-1/2 w-[900px] h-[420px] bg-gradient-to-b from-[#E50914]/10 dark:from-[#E50914]/16 via-[#E50914]/4 to-transparent blur-3xl pointer-events-none -z-10"
         aria-hidden="true"
       />
 
-      <div className="max-w-7xl mx-auto px-6">
-        {/* Brand Kicker & Session Date */}
-        <div className="flex flex-wrap items-center gap-2.5 text-xs font-semibold tracking-wider text-[#E50914] uppercase font-montserrat mb-4">
-          <span className="bg-[#E50914]/10 dark:bg-[#E50914]/15 border border-[#E50914]/30 px-2 py-0.5 rounded text-[11px] font-bold">
-            {programConfig.kicker || 'PIGA STUDIO TECH MEDIA'}
-          </span>
-          <span className="text-slate-400 dark:text-slate-600" aria-hidden="true">·</span>
-          <span className="text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
-            <Calendar className="w-3.5 h-3.5 text-[#E50914]" />
-            <span>{programConfig.dateDisplay}</span>
-          </span>
-          {programConfig.timeDisplay && (
-            <>
-              <span className="text-slate-400 dark:text-slate-600" aria-hidden="true">·</span>
-              <span className="text-slate-600 dark:text-slate-400 flex items-center gap-1">
-                <Clock className="w-3 h-3" />
-                <span>{programConfig.timeDisplay}</span>
+      <div className="max-w-6xl mx-auto px-6">
+        {/* ============ Editorial Copy Block (centered) ============ */}
+        <div className="max-w-4xl mx-auto text-center space-y-7">
+          {/* Eyebrow pill : pulsing brand dot + meta */}
+          <div className="flex justify-center">
+            <div className="inline-flex items-center gap-2.5 bg-slate-50 dark:bg-[#0A0A0A] border border-slate-200 dark:border-[#1E1E1E] rounded-full pl-3 pr-4 py-1.5 shadow-xs">
+              <span className="relative flex h-2 w-2" aria-hidden="true">
+                <span className={`animate-ping absolute inline-flex h-full w-full rounded-full ${isSoldOut ? 'bg-slate-400' : 'bg-[#E50914]'} opacity-60`} />
+                <span className={`relative inline-flex rounded-full h-2 w-2 ${isSoldOut ? 'bg-slate-400' : 'bg-[#E50914]'}`} />
               </span>
-            </>
+              <span className="text-[11px] font-bold font-montserrat uppercase tracking-wider text-slate-900 dark:text-white">
+                {programConfig.kicker || 'PIGA STUDIO TECH MEDIA'}
+              </span>
+              <span className="w-1 h-1 rounded-full bg-slate-300 dark:bg-[#333333]" aria-hidden="true" />
+              <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 tracking-wide">
+                {programConfig.dateDisplay}{programConfig.timeDisplay ? ` · ${programConfig.timeDisplay}` : ''}
+              </span>
+            </div>
+          </div>
+
+          {/* Oversized display headline */}
+          <h1 className="text-[clamp(38px,7vw,86px)] font-black font-montserrat tracking-[-0.035em] leading-[0.98] text-balance text-slate-900 dark:text-white">
+            {programConfig.title}
+          </h1>
+
+          {/* Asterisk footnote tagline — subscrr style */}
+          {programConfig.tagline && (
+            <p className="text-sm font-semibold font-poppins text-slate-400 dark:text-slate-500 tracking-wide text-center">
+              *{programConfig.tagline}
+            </p>
           )}
+
+          {/* Description lead */}
+          <p className="text-base sm:text-lg text-slate-600 dark:text-slate-300 leading-relaxed font-inter max-w-2xl mx-auto">
+            {programConfig.description}
+          </p>
+
+          {/* Pill CTAs */}
+          <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-1">
+            <button
+              onClick={onOpenRegister}
+              disabled={isSoldOut}
+              className={`group px-8 py-4 text-xs font-bold font-montserrat tracking-wide rounded-full transition-all flex items-center justify-center gap-2.5 ${
+                isSoldOut
+                  ? 'bg-slate-200 dark:bg-[#121212] text-slate-500 cursor-not-allowed'
+                  : 'text-white bg-[#E50914] hover:bg-[#C80711] shadow-lg shadow-[#E50914]/25 hover:shadow-xl hover:shadow-[#E50914]/30 hover:-translate-y-0.5 cursor-pointer'
+              }`}
+            >
+              <span>
+                {isSoldOut
+                  ? 'Inscriptions Fermées (Complet)'
+                  : `${isComingSoon ? 'Se Pré-inscrire' : "S'inscrire"} par Orange Money · $${programConfig.ticketPriceUsd.toFixed(2)}`}
+              </span>
+              {!isSoldOut && (
+                <ArrowRight className="w-4 h-4 transition-transform group-hover:translate-x-0.5" />
+              )}
+            </button>
+
+            <a
+              href="#programme"
+              className="px-8 py-4 text-xs font-bold font-montserrat tracking-wide text-slate-800 dark:text-white bg-white dark:bg-[#0E0E0E] border border-slate-300 dark:border-[#262626] hover:border-[#E50914]/60 rounded-full transition-all hover:-translate-y-0.5 inline-flex items-center justify-center"
+            >
+              Voir le programme
+            </a>
+
+            <button
+              onClick={onOpenAdmin}
+              className="px-6 py-4 text-xs font-semibold font-inter text-slate-400 hover:text-slate-700 dark:text-slate-500 dark:hover:text-slate-200 rounded-full transition-colors flex items-center gap-1.5 cursor-pointer"
+              title="Console Supervision Admin"
+            >
+              <Lock className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Console Supervision</span>
+            </button>
+          </div>
+
+          {/* Floating glass stat chips */}
+          <div className="flex flex-wrap items-center justify-center gap-2.5 pt-3">
+            {statistics.map(stat => (
+              <div
+                key={stat.label}
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-white/75 dark:bg-[#0A0A0A]/75 backdrop-blur-md border border-slate-200 dark:border-[#1E1E1E] shadow-xs"
+              >
+                <span className="text-[10px] uppercase tracking-wider font-bold font-montserrat text-slate-400 dark:text-slate-500">{stat.label}</span>
+                <span className="font-mono text-xs font-bold text-slate-900 dark:text-white">{stat.value}</span>
+              </div>
+            ))}
+          </div>
         </div>
 
-        {/* 2-Column Split */}
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-12 items-center">
-          {/* Column 1: Editorial Pitch */}
-          <div className="lg:col-span-7 space-y-6">
-            <h1 className="text-4xl sm:text-5xl lg:text-6xl font-black font-montserrat tracking-tight text-slate-900 dark:text-white leading-[1.08] text-balance">
-              {programConfig.title}
-            </h1>
+        {/* ============ Showcase Frame ============ */}
+        <div className="relative mt-16 sm:mt-20 max-w-4xl mx-auto">
+          <div className="relative rounded-[28px] overflow-hidden border border-slate-200 dark:border-[#1E1E1E] shadow-[0_40px_80px_-30px_rgba(0,0,0,0.25)] dark:shadow-[0_40px_80px_-30px_rgba(0,0,0,0.9)]">
+            <img
+              src={resolveFormationImageUrl(programConfig.heroImageUrl, HERO_IMAGE_FALLBACK)}
+              alt={programConfig.title}
+              className="w-full h-auto object-cover aspect-[16/9]"
+              referrerPolicy="no-referrer"
+            />
 
-            {programConfig.tagline && (
-              <div className="text-sm font-semibold font-poppins text-[#E50914] tracking-wide">
-                {programConfig.tagline}
-              </div>
-            )}
-
-            <p className="text-base text-slate-600 dark:text-slate-300 leading-relaxed font-inter max-w-2xl">
-              {programConfig.description}
-            </p>
-
-            {/* Exclusive Orange Money Box */}
-            <div className="p-4 rounded-lg bg-slate-50 dark:bg-[#0A0A0A] border border-slate-200 dark:border-[#222222] space-y-2.5 transition-colors">
-              <div className="flex items-center justify-between text-xs">
-                <span className="font-semibold text-slate-800 dark:text-slate-300 font-poppins flex items-center gap-2">
-                  <span className="w-2 h-2 rounded-full bg-[#E50914]" />
-                  Paiement Exclusif Orange Money :
-                </span>
-                <span className="font-mono text-[#E50914] font-bold text-sm">
-                  ${programConfig.ticketPriceUsd.toFixed(2)} USD
-                </span>
-              </div>
-              <div className="flex items-center justify-between text-xs">
-                <span className="text-slate-600 dark:text-slate-400">Numéro Officiel de Versement :</span>
-                <span className="font-mono text-slate-900 dark:text-white font-bold bg-white dark:bg-[#151515] px-2.5 py-1 rounded border border-slate-300 dark:border-[#2A2A2A] shadow-xs">
-                  {programConfig.orangeMoneyNumber}
-                </span>
-              </div>
-              <div className="text-[11px] text-slate-500 pt-0.5">
-                Titulaire : {programConfig.orangeMoneyHolder || 'PIGA STUDIO'} · Direction : {programConfig.directionEmail} ({programConfig.directionPhone})
-              </div>
-            </div>
-
-            {/* CTAs */}
-            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-4 pt-2">
-              <button
-                onClick={onOpenRegister}
-                disabled={isSoldOut}
-                className={`px-7 py-3.5 text-xs font-bold font-montserrat tracking-wide rounded-md transition-all shadow-lg flex items-center justify-center gap-2.5 cursor-pointer ${
-                  isSoldOut
-                    ? 'bg-slate-300 dark:bg-slate-800 text-slate-500 cursor-not-allowed'
-                    : 'text-white bg-[#E50914] hover:bg-[#C80711] shadow-[#E50914]/20'
-                }`}
-              >
-                {isSoldOut ? (
-                  <span>Inscriptions Fermées (Complet)</span>
-                ) : isComingSoon ? (
-                  <>
-                    <span>Se Pré-inscrire par Orange Money · ${programConfig.ticketPriceUsd.toFixed(2)} USD</span>
-                    <ArrowRight className="w-4 h-4" />
-                  </>
-                ) : (
-                  <>
-                    <span>S'inscrire par Orange Money · ${programConfig.ticketPriceUsd.toFixed(2)} USD</span>
-                    <ArrowRight className="w-4 h-4" />
-                  </>
-                )}
-              </button>
-
-              <button
-                onClick={onOpenAdmin}
-                className="px-5 py-3.5 text-xs font-semibold font-inter text-slate-700 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white bg-slate-100 hover:bg-slate-200 dark:bg-[#111111] dark:hover:bg-[#1A1A1A] border border-slate-300 dark:border-[#222222] rounded-md transition-colors flex items-center justify-center gap-2 cursor-pointer"
-              >
-                <Lock className="w-4 h-4 text-[#E50914]" />
-                <span>Console Supervision Admin</span>
-              </button>
-            </div>
-
-            {/* Inventory Real-Time */}
-            <div className="pt-2 text-xs text-slate-600 dark:text-slate-400 flex items-center gap-3 font-inter">
-              <span className="font-medium text-slate-900 dark:text-white">Places Disponibles :</span>
-              <span className="font-mono tabular-nums text-[#E50914] font-bold">
-                {inventory.availableSeats} restantes
-              </span>
-              <span className="text-slate-400 dark:text-slate-700" aria-hidden="true">/</span>
-              <span className="font-mono tabular-nums text-slate-500">
-                {programConfig.totalCapacity} places au total
-              </span>
-            </div>
-          </div>
-
-          {/* Column 2: Architectural Asset */}
-          <div className="lg:col-span-5 relative">
-            <div className="relative rounded-xl overflow-hidden border border-slate-200 dark:border-[#222222] bg-slate-100 dark:bg-[#0A0A0A] shadow-xl">
-              <img
-                src={programConfig.heroImageUrl || "/src/assets/images/hero_arsenal_agentique_1793949804735.jpg"}
-                alt={programConfig.title}
-                className="w-full h-auto object-cover aspect-[16/10] hover:scale-102 transition-transform duration-500"
-                referrerPolicy="no-referrer"
-              />
-              
-              {/* Overlay Ribbon */}
-              <div className="absolute inset-x-0 bottom-0 p-4 bg-gradient-to-t from-black/90 via-black/70 to-transparent flex items-center justify-between text-xs">
+            {/* Bottom glass overlay */}
+            <div className="absolute inset-x-0 bottom-0 p-5 sm:p-7 bg-gradient-to-t from-black/85 via-black/40 to-transparent">
+              <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
                 <div>
-                  <div className="font-bold text-white font-montserrat tracking-wide flex items-center gap-1.5">
-                    <MapPin className="w-3.5 h-3.5 text-[#E50914]" />
+                  <div className="text-[10px] uppercase tracking-[0.2em] font-bold font-montserrat text-white/60 mb-1.5">
+                    Session Présentielle & Diffusion Chiffrée
+                  </div>
+                  <div className="text-lg sm:text-xl font-black font-montserrat text-white tracking-tight flex items-center gap-2">
+                    <MapPin className="w-4 h-4 text-[#E50914] shrink-0" />
                     <span>{programConfig.locationDisplay || 'PIGA STUDIO TECH HUB'}</span>
                   </div>
-                  <div className="text-[11px] text-slate-300 font-inter">Billetterie cryptographique AES-256-GCM</div>
                 </div>
-                <div className="font-mono text-[#E50914] font-bold text-xs">
-                  {programConfig.dateDisplay}
+                <div className="flex items-center gap-2.5">
+                  <div className="px-4 py-2 rounded-full bg-white/10 dark:bg-white/10 backdrop-blur-md border border-white/20">
+                    <span className="font-mono text-xs font-bold text-white">{programConfig.dateDisplay}</span>
+                  </div>
+                  <div className="px-4 py-2 rounded-full bg-[#E50914] backdrop-blur-md shadow-lg shadow-[#E50914]/40">
+                    <span className="font-mono text-xs font-bold text-white">${programConfig.ticketPriceUsd.toFixed(2)} USD</span>
+                  </div>
                 </div>
               </div>
             </div>
           </div>
+
+          {/* Shadow accent */}
+          <div className="absolute -bottom-8 left-1/2 -translate-x-1/2 w-3/4 h-16 bg-[#E50914]/10 blur-3xl rounded-full pointer-events-none" aria-hidden="true" />
         </div>
       </div>
     </section>

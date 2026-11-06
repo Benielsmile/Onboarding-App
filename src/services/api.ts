@@ -13,7 +13,9 @@ import type {
   AuditLogEntry, 
   InventoryStatus,
   CryptographicTokenVerification,
-  ProgramConfig
+  ProgramConfig,
+  FormationRegistryState,
+  AdminStats
 } from '../types/index.ts';
 import { decryptAndVerifyTicketToken } from '../utils/cryptoSecurity.ts';
 import { DEFAULT_PROGRAM_CONFIG } from '../utils/programPresets.ts';
@@ -27,6 +29,50 @@ export function sanitizeSafeText(dirty: string): string {
 }
 
 export const api = {
+  /**
+   * Secrets vault for the admin bearer session (issued by /api/admin/auth).
+   * Every /api/admin request beneath the Zero-Trust gateway MUST carry it.
+   */
+  adminToken: null as string | null,
+
+  _adminFetch(path: string, init: RequestInit = {}): Promise<Response> {
+    const initHeaders = (init.headers || {}) as Record<string, string>;
+    const headers: Record<string, string> = { 'Content-Type': 'application/json', ...initHeaders };
+    if (this.adminToken) {
+      headers['Authorization'] = `Bearer ${this.adminToken}`;
+    }
+    return fetch(path, { ...init, headers });
+  },
+
+  /**
+   * Authenticates the PIGA STUDIO Direction (owner-only email + password)
+   * and vaults the bearer session
+   */
+  async adminLogin(email: string, password: string): Promise<{ success: boolean; token?: string; message?: string }> {
+    const res = await fetch('/api/admin/auth', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password })
+    });
+    const data = await res.json();
+    if (data.success && data.token) {
+      this.adminToken = data.token;
+    }
+    return data;
+  },
+
+  /**
+   * Admin sales analytics scoped to the launched formation
+   */
+  async getAdminStats(): Promise<AdminStats | null> {
+    try {
+      const res = await this._adminFetch('/api/admin/stats');
+      if (!res.ok) return null;
+      return await res.json();
+    } catch {
+      return null;
+    }
+  },
   /**
    * Fetches real-time seat inventory and pricing
    */
@@ -80,22 +126,10 @@ export const api = {
   },
 
   /**
-   * Authenticates administrator with MFA code
-   */
-  async adminLogin(passkey: string, mfaCode: string): Promise<{ success: boolean; token?: string; message?: string }> {
-    const res = await fetch('/api/admin/auth', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ passkey, mfaCode })
-    });
-    return await res.json();
-  },
-
-  /**
    * Fetches all registered participants (Admin only)
    */
   async getParticipants(): Promise<Participant[]> {
-    const res = await fetch('/api/admin/participants');
+    const res = await this._adminFetch('/api/admin/participants');
     if (!res.ok) throw new Error('Accès administrateur non autorisé.');
     const rawList = await res.json() as Participant[];
     
@@ -112,7 +146,7 @@ export const api = {
    * Confirms participant payment and triggers AES-256-GCM crypto token generation
    */
   async confirmPayment(participantId: string): Promise<Participant> {
-    const res = await fetch('/api/admin/confirm-payment', {
+    const res = await this._adminFetch('/api/admin/confirm-payment', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ participantId, adminId: 'ADM-2026-CHIEF' })
@@ -128,7 +162,7 @@ export const api = {
    * Rejects participant payment with audit reason
    */
   async rejectPayment(participantId: string, reason: string): Promise<Participant> {
-    const res = await fetch('/api/admin/reject-payment', {
+    const res = await this._adminFetch('/api/admin/reject-payment', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ participantId, reason, adminId: 'ADM-2026-CHIEF' })
@@ -144,7 +178,7 @@ export const api = {
    * Revokes participant reservation and triggers direct client outreach via WhatsApp/Email
    */
   async revokeReservation(participantId: string, reason: string): Promise<Participant> {
-    const res = await fetch('/api/admin/revoke-reservation', {
+    const res = await this._adminFetch('/api/admin/revoke-reservation', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ participantId, reason, adminId: 'ADM-2026-CHIEF' })
@@ -160,7 +194,7 @@ export const api = {
    * Retrieves immutable audit log stream
    */
   async getAuditLogs(): Promise<AuditLogEntry[]> {
-    const res = await fetch('/api/admin/audit-logs');
+    const res = await this._adminFetch('/api/admin/audit-logs');
     if (!res.ok) return [];
     return await res.json();
   },
@@ -169,7 +203,7 @@ export const api = {
    * Records an admin action in the immutable audit log
    */
   async logAdminAction(actionType: AuditLogEntry['actionType'], participantId?: string, details?: Record<string, unknown>): Promise<void> {
-    await fetch('/api/admin/log-action', {
+    await this._adminFetch('/api/admin/log-action', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ actionType, participantId, details })
@@ -229,7 +263,7 @@ export const api = {
    * Updates the live training program configuration from Admin Dashboard
    */
   async updateProgramConfig(config: Partial<ProgramConfig>, adminId = 'ADM-2026-CHIEF'): Promise<{ success: boolean; config: ProgramConfig }> {
-    const res = await fetch('/api/admin/program-config', {
+    const res = await this._adminFetch('/api/admin/program-config', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ config, adminId })
@@ -245,7 +279,7 @@ export const api = {
    * Loads a pre-packaged training preset from Admin Dashboard
    */
   async loadProgramPreset(presetId: string, adminId = 'ADM-2026-CHIEF'): Promise<{ success: boolean; config: ProgramConfig }> {
-    const res = await fetch('/api/admin/program-preset', {
+    const res = await this._adminFetch('/api/admin/program-preset', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ presetId, adminId })
@@ -253,6 +287,102 @@ export const api = {
     const data = await res.json();
     if (!res.ok || !data.success) {
       throw new Error(data.message || 'Échec du chargement du modèle de formation.');
+    }
+    return data;
+  },
+
+  /**
+   * Lists every saved formation in the durable registry + the active one
+   */
+  async listFormations(): Promise<FormationRegistryState> {
+    try {
+      const res = await this._adminFetch('/api/admin/formations');
+      if (!res.ok) throw new Error('Erreur de chargement du registre');
+      return await res.json();
+    } catch {
+      return { activeId: DEFAULT_PROGRAM_CONFIG.id, formations: [] };
+    }
+  },
+
+  /**
+   * Launches a brand-new blank formation and activates it immediately
+   */
+  async createFormation(name: string, adminId = 'ADM-2026-CHIEF'): Promise<{ success: boolean; config: ProgramConfig }> {
+    const res = await this._adminFetch('/api/admin/formations', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, adminId })
+    });
+    const data = await res.json();
+    if (!res.ok || !data.success) {
+      throw new Error(data.message || 'Échec de création de la nouvelle formation.');
+    }
+    return data;
+  },
+
+  /**
+   * Duplicates the active formation into the registry (not activated)
+   */
+  async duplicateFormation(name: string, adminId = 'ADM-2026-CHIEF'): Promise<{ success: boolean; config: ProgramConfig }> {
+    const res = await this._adminFetch('/api/admin/formations/duplicate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, adminId })
+    });
+    const data = await res.json();
+    if (!res.ok || !data.success) {
+      throw new Error(data.message || 'Échec de la duplication.');
+    }
+    return data;
+  },
+
+  /**
+   * Activates a saved formation: it becomes the live landing page
+   */
+  async activateFormation(id: string, adminId = 'ADM-2026-CHIEF'): Promise<{ success: boolean; config: ProgramConfig }> {
+    const res = await fetch(`/api/admin/formations/${encodeURIComponent(id)}/activate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ adminId })
+    });
+    const data = await res.json();
+    if (!res.ok || !data.success) {
+      throw new Error(data.message || 'Échec de l\'activation.');
+    }
+    return data;
+  },
+
+  /**
+   * Deletes a non-active saved formation
+   */
+  async deleteFormation(id: string): Promise<{ success: boolean }> {
+    const res = await fetch(`/api/admin/formations/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    const data = await res.json();
+    if (!res.ok || !data.success) {
+      throw new Error(data.message || 'Échec de la suppression.');
+    }
+    return data;
+  },
+
+  /**
+   * Uploads a landing page image and returns its public URL
+   */
+  async uploadImage(file: File): Promise<{ success: boolean; url: string }> {
+    const dataUrl = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result));
+      reader.onerror = () => reject(new Error('Échec de lecture du fichier.'));
+      reader.readAsDataURL(file);
+    });
+
+    const res = await this._adminFetch('/api/admin/upload-image', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ dataUrl, fileName: file.name })
+    });
+    const data = await res.json();
+    if (!res.ok || !data.success) {
+      throw new Error(data.message || 'Échec de l\'enregistrement de l\'image.');
     }
     return data;
   }

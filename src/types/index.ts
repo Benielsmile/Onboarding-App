@@ -8,7 +8,7 @@
 
 export type ParticipantStatus = 'PENDING' | 'CONFIRMED' | 'REJECTED' | 'REVOKED';
 
-export type MobileMoneyProvider = 'ORANGE_MONEY';
+export type PaymentProvider = 'ORANGE_MONEY';
 
 export interface Participant {
   id: string;
@@ -20,8 +20,9 @@ export interface Participant {
   phoneMasked: string;
   networkCarrier: string;
   status: ParticipantStatus;
-  priceUsd: number; // Strictly 20.00 USD
-  paymentProvider: MobileMoneyProvider;
+  priceUsd: number; // Enforced server-side from the active formation config
+  programId?: string; // Formation this registration belongs to
+  paymentProvider: PaymentProvider;
   transactionReference: string;
   proofFileName: string;
   proofStoragePath: string;
@@ -40,12 +41,12 @@ export interface RegistrationRequest {
   fullName: string;
   email: string;
   phone: string;
-  paymentProvider: MobileMoneyProvider;
+  paymentProvider: PaymentProvider;
   transactionReference: string;
   proofBase64?: string;
   proofFileName?: string;
   ndaAccepted: boolean;
-  // Client cannot dictate price; strictly verified server-side
+  // Client cannot dictate price nor provider (Orange Money only, strictly verified server-side)
 }
 
 export interface RegistrationResponse {
@@ -89,6 +90,11 @@ export interface ProgramConfig {
   modules: ProgramModule[];
   ndaTitle: string;
   ndaClauses: string[];
+  // --- Landing page extensibility (all optional for backward compatibility) ---
+  curriculumTitle?: string;       // Section "Programme" main heading
+  curriculumIntro?: string;       // Section "Programme" introductory paragraph
+  footerAbout?: string;           // Footer brand/formation description
+  vipWhatsAppUrl?: string;        // VIP WhatsApp community link
   updatedAt: string;
   updatedBy?: string;
 }
@@ -118,6 +124,62 @@ export interface CryptographicTokenVerification {
   payload?: TicketPayload;
   error?: string;
   verificationTimestamp: string;
+}
+
+/** Lightweight descriptor for the Formation registry (admin library) */
+export interface FormationSummary {
+  id: string;
+  title: string;
+  status: ProgramConfig['status'];
+  dateDisplay: string;
+  updatedAt: string;
+}
+
+export interface FormationRegistryState {
+  activeId: string;
+  formations: FormationSummary[];
+}
+
+/** Sales analytics for one formation (dashboard "Historique des ventes") */
+export interface FormationSalesSummary {
+  id: string;
+  title: string;
+  dateDisplay: string;
+  ticketPriceUsd: number;
+  isActive: boolean;
+  total: number;
+  confirmed: number;
+  pending: number;
+  rejected: number;
+  revoked: number;
+  revenueConfirmedUsd: number;
+  revenuePipelineUsd: number;
+  lastRegistrationAt: string | null;
+}
+
+export interface AdminStats {
+  activeId: string;
+  activeFormation: {
+    id: string;
+    title: string;
+    dateDisplay: string;
+    ticketPriceUsd: number;
+    totalCapacity: number;
+    status: ProgramConfig['status'];
+  };
+  active: {
+    total: number;
+    confirmed: number;
+    pending: number;
+    rejected: number;
+    revoked: number;
+    revenueConfirmedUsd: number;
+    revenuePipelineUsd: number;
+    lastRegistrationAt: string | null;
+    carriers: Record<string, number>;
+    daily: { date: string; count: number }[];
+  };
+  byFormation: FormationSalesSummary[];
 }
 
 export interface InventoryStatus {

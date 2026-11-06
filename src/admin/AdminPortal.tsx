@@ -34,20 +34,27 @@ import {
   LogOut, 
   Smartphone, 
   AlertTriangle,
-  Camera
+  Camera,
+  Mail,
+  SlidersHorizontal,
+  TrendingUp
 } from 'lucide-react';
 import { Html5QrcodeScanner } from 'html5-qrcode';
 import { PigaLogo } from '../components/PigaLogo.tsx';
 import { ThemeToggle } from '../components/ThemeToggle.tsx';
-import type { Participant, AuditLogEntry, InventoryStatus, CryptographicTokenVerification } from '../types/index.ts';
+import { FormationEditor } from './FormationEditor.tsx';
+import type { Participant, AuditLogEntry, InventoryStatus, CryptographicTokenVerification, ProgramConfig, AdminStats } from '../types/index.ts';
 import { api, sanitizeSafeText } from '../services/api.ts';
 import { downloadTicketPDF } from '../utils/pdfGenerator.ts';
+import { DEFAULT_PROGRAM_CONFIG } from '../utils/programPresets.ts';
 import { 
   generateWhatsAppConfirmationUrl, 
   generateWhatsAppRevocationUrl,
+  resolveMessageInfo,
   PIGA_DIRECTION_EMAIL,
   PIGA_DIRECTION_PHONE_LOCAL,
-  PIGA_ORANGE_MONEY_DISPLAY
+  PIGA_ORANGE_MONEY_DISPLAY,
+  type FormationMessageInfo
 } from '../utils/whatsappHelper.ts';
 import { 
   usePWAInstall, 
@@ -57,23 +64,26 @@ import {
 
 interface AdminPortalProps {
   onBackToClient: () => void;
+  currentConfig?: ProgramConfig;
+  onConfigUpdated?: (config: ProgramConfig) => void;
 }
 
-export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToClient }) => {
-  // Authentication & Session
+export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToClient, currentConfig, onConfigUpdated }) => {
+  // Authentication & Session — Owner-only identity (PIGA STUDIO Direction)
   const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [passkey, setPasskey] = useState('ARSENAL-ADMIN-2026');
-  const [mfaCode, setMfaCode] = useState('894721');
+  const [adminEmail, setAdminEmail] = useState('');
+  const [adminPassword, setAdminPassword] = useState('');
   const [authError, setAuthError] = useState<string | null>(null);
   const [isAuthenticating, setIsAuthenticating] = useState(false);
 
   // Active Tab: 'dashboard' | 'participants' | 'scanner' | 'audit'
-  const [currentTab, setCurrentTab] = useState<'dashboard' | 'participants' | 'scanner' | 'audit'>('participants');
+  const [currentTab, setCurrentTab] = useState<'formation' | 'dashboard' | 'participants' | 'scanner' | 'audit'>('formation');
 
   // Core Data
   const [participants, setParticipants] = useState<Participant[]>([]);
   const [auditLogs, setAuditLogs] = useState<AuditLogEntry[]>([]);
   const [inventory, setInventory] = useState<InventoryStatus | null>(null);
+  const [adminStats, setAdminStats] = useState<AdminStats | null>(null);
   const [isLoading, setIsLoading] = useState(false);
 
   // Filters
@@ -126,6 +136,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToClient }) => {
       setParticipants(parts);
       setAuditLogs(logs);
       setInventory(inv);
+      api.getAdminStats().then(stats => setAdminStats(stats)).catch(() => {});
     } catch (err) {
       console.error('[ADMIN LOAD ERROR]:', err);
     } finally {
@@ -139,17 +150,35 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToClient }) => {
     }
   }, [isAuthenticated]);
 
+  // Formation-scoped info injected into WhatsApp messages & PDF tickets
+  const formationInfo: FormationMessageInfo | undefined = currentConfig ? {
+    title: currentConfig.title,
+    tagline: currentConfig.tagline,
+    dateDisplay: currentConfig.dateDisplay,
+    timeDisplay: currentConfig.timeDisplay,
+    locationDisplay: currentConfig.locationDisplay,
+    orangeMoneyNumber: currentConfig.orangeMoneyNumber,
+    orangeMoneyHolder: currentConfig.orangeMoneyHolder,
+    directionEmail: currentConfig.directionEmail,
+    directionPhone: currentConfig.directionPhone,
+    vipWhatsAppUrl: currentConfig.vipWhatsAppUrl,
+    moduleSummaries: currentConfig.modules.slice(0, 4).map(m => `• ${m.title}${m.highlight ? ` — ${m.highlight}` : ''}`)
+  } : undefined;
+  const resolvedInfo = resolveMessageInfo(formationInfo);
+  const resolvedFormationPrice = currentConfig?.ticketPriceUsd ?? 20;
+
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsAuthenticating(true);
     setAuthError(null);
 
     try {
-      const res = await api.adminLogin(passkey, mfaCode);
+      const res = await api.adminLogin(adminEmail.trim(), adminPassword);
       if (res.success) {
         setIsAuthenticated(true);
+        setAdminPassword('');
       } else {
-        setAuthError(res.message || 'Identifiants ou code MFA incorrect.');
+        setAuthError(res.message || 'Adresse e-mail ou mot de passe incorrect.');
       }
     } catch {
       setAuthError('Erreur de communication avec le serveur d\'authentification.');
@@ -178,7 +207,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToClient }) => {
   // 2. Open Revocation Modal
   const openRevokeModal = (p: Participant) => {
     setRevokingParticipant(p);
-    setRevocationReason('Transfert Orange Money non retrouvé sur le relevé du +243 803 240 289.');
+    setRevocationReason(`Transfert Orange Money non retrouvé sur le relevé du ${resolvedInfo.orangeMoneyNumber}.`);
   };
 
   // 3. Confirm Revocation & Generate WhatsApp / Email Outreach
@@ -192,7 +221,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToClient }) => {
       await loadData();
 
       // Generate pre-filled WhatsApp revocation message to reach client immediately
-      const { url } = generateWhatsAppRevocationUrl(revokingParticipant, revocationReason);
+      const { url } = generateWhatsAppRevocationUrl(revokingParticipant, revocationReason, formationInfo);
       
       setActionSuccessMessage(`Réservation révoquée. Vous pouvez maintenant contacter le client par WhatsApp ou Email.`);
       setTimeout(() => setActionSuccessMessage(null), 6000);
@@ -320,7 +349,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToClient }) => {
   const confirmedCount = participants.filter(p => p.status === 'CONFIRMED').length;
   const pendingCount = participants.filter(p => p.status === 'PENDING').length;
   const revokedCount = participants.filter(p => p.status === 'REVOKED').length;
-  const totalRevenue = confirmedCount * 20;
+  const totalRevenue = participants.reduce((sum, p) => p.status === 'CONFIRMED' ? sum + (p.priceUsd ?? 20) : sum, 0);
 
   // --------------------------------------------------------------------------
   // LOGIN SCREEN
@@ -339,7 +368,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToClient }) => {
               Console de Supervision
             </h1>
             <p className="text-xs text-slate-500 dark:text-slate-400 font-inter">
-              Plateforme d'administration sécurisée PIGA STUDIO · Arsenal Agentique 2026.
+              Plateforme d'administration sécurisée PIGA STUDIO · {resolvedInfo.decorativeName} {new Date().getFullYear()}.
             </p>
           </div>
 
@@ -353,41 +382,40 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToClient }) => {
           <form onSubmit={handleLogin} className="space-y-4 font-inter">
             <div>
               <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5 font-montserrat">
-                Clé d'Accès Administrateur
+                Adresse E-mail Direction
+              </label>
+              <div className="relative">
+                <input
+                  type="email"
+                  autoComplete="username"
+                  value={adminEmail}
+                  onChange={(e) => setAdminEmail(e.target.value)}
+                  placeholder="direction@piga.cd"
+                  className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-[#111111] border border-slate-300 dark:border-[#262626] focus:border-[#E50914] rounded-md text-sm text-slate-900 dark:text-white outline-none"
+                />
+                <Mail className="w-4 h-4 text-slate-400 dark:text-slate-500 absolute right-3 top-3" />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5 font-montserrat">
+                Mot de Passe Sécurisé
               </label>
               <div className="relative">
                 <input
                   type="password"
-                  value={passkey}
-                  onChange={(e) => setPasskey(e.target.value)}
-                  placeholder="Clé secrète PIGA"
+                  autoComplete="current-password"
+                  value={adminPassword}
+                  onChange={(e) => setAdminPassword(e.target.value)}
+                  placeholder="••••••••••••"
                   className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-[#111111] border border-slate-300 dark:border-[#262626] focus:border-[#E50914] rounded-md text-sm text-slate-900 dark:text-white font-mono outline-none"
                 />
                 <Key className="w-4 h-4 text-slate-400 dark:text-slate-500 absolute right-3 top-3" />
               </div>
             </div>
 
-            <div>
-              <div className="flex items-center justify-between mb-1.5">
-                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 font-montserrat">
-                  Code MFA Sécurisé (6 chiffres)
-                </label>
-                <span className="text-[10px] text-[#E50914] font-semibold">MFA Actif</span>
-              </div>
-              <input
-                type="text"
-                maxLength={6}
-                value={mfaCode}
-                onChange={(e) => setMfaCode(e.target.value)}
-                placeholder="Ex: 894721"
-                className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-[#111111] border border-slate-300 dark:border-[#262626] focus:border-[#E50914] rounded-md text-sm text-slate-900 dark:text-white font-mono text-center tracking-widest outline-none"
-              />
-            </div>
-
-            <div className="p-3 rounded bg-slate-100 dark:bg-[#111111] border border-slate-200 dark:border-[#222222] text-[11px] text-slate-600 dark:text-slate-400">
-              <span className="text-slate-800 dark:text-slate-300 font-semibold">Identifiants configurés pour le test :</span>
-              <br />
-              Passkey : <code className="text-[#E50914] font-bold">ARSENAL-ADMIN-2026</code> · Code MFA : <code className="text-[#10B981] font-bold">894721</code>
+            <div className="p-3 rounded bg-[#E50914]/5 border border-[#E50914]/25 text-[11px] text-slate-600 dark:text-slate-400">
+              <span className="text-[#E50914] font-bold">Accès restreint :</span> la console n'accepte que l'identité de la Direction PIGA STUDIO. Toute tentative est journalisée dans l'audit immuable.
             </div>
 
             <button
@@ -429,9 +457,9 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToClient }) => {
           <PigaLogo variant="compact" size="sm" />
           <div className="border-l border-slate-200 dark:border-[#222222] pl-4">
             <h1 className="text-sm font-bold font-montserrat text-slate-900 dark:text-white flex items-center gap-2 flex-wrap">
-              <span>Arsenal Agentique · Supervision PIGA</span>
+              <span>{resolvedInfo.decorativeName} · Supervision PIGA</span>
               <span className="text-[10px] font-mono text-[#E50914] bg-[#E50914]/10 dark:bg-[#E50914]/15 px-2 py-0.5 rounded font-bold border border-[#E50914]/30">
-                ORANGE MONEY ({PIGA_ORANGE_MONEY_DISPLAY})
+                ORANGE MONEY ({resolvedInfo.orangeMoneyNumber})
               </span>
             </h1>
             <div className="text-[11px] text-slate-500 dark:text-slate-400 flex items-center gap-2 mt-0.5">
@@ -560,10 +588,10 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToClient }) => {
               <DollarSign className="w-4 h-4 text-[#10B981]" />
             </div>
             <div className="text-2xl font-bold font-mono text-slate-900 dark:text-white tabular-nums">
-              ${totalRevenue}.00 <span className="text-xs text-slate-400 font-normal">USD</span>
+              ${totalRevenue.toFixed(2)} <span className="text-xs text-slate-400 font-normal">USD</span>
             </div>
             <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">
-              $20.00 par participant
+              ${resolvedFormationPrice.toFixed(2)} par participant
             </div>
           </div>
         </div>
@@ -571,6 +599,30 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToClient }) => {
         {/* Admin Navigation Bar / Sidebar Tabs */}
         <div className="flex items-center justify-between border-b border-slate-200 dark:border-[#1E1E1E] pb-3">
           <div className="flex flex-wrap items-center gap-2">
+            <button
+              onClick={() => setCurrentTab('formation')}
+              className={`px-4 py-2 text-xs font-bold font-montserrat rounded-md transition-colors cursor-pointer flex items-center gap-2 ${
+                currentTab === 'formation'
+                  ? 'bg-[#E50914] text-white'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white bg-slate-100 dark:bg-[#0E0E0E]'
+              }`}
+            >
+              <SlidersHorizontal className="w-3.5 h-3.5" />
+              <span>Formation &amp; Landing Page</span>
+            </button>
+
+            <button
+              onClick={() => setCurrentTab('dashboard')}
+              className={`px-4 py-2 text-xs font-bold font-montserrat rounded-md transition-colors cursor-pointer flex items-center gap-2 ${
+                currentTab === 'dashboard'
+                  ? 'bg-[#E50914] text-white'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white bg-slate-100 dark:bg-[#0E0E0E]'
+              }`}
+            >
+              <TrendingUp className="w-3.5 h-3.5" />
+              <span>Historique des Ventes</span>
+            </button>
+
             <button
               onClick={() => setCurrentTab('participants')}
               className={`px-4 py-2 text-xs font-bold font-montserrat rounded-md transition-colors cursor-pointer flex items-center gap-2 ${
@@ -610,7 +662,146 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToClient }) => {
         </div>
 
         {/* ==================================================================== */}
-        {/* TAB 1: PARTICIPANTS REGISTER & ORANGE MONEY MANAGEMENT */}
+        {/* TAB 0: FORMATION & LANDING PAGE CMS EDITOR */}
+        {/* ==================================================================== */}
+        {currentTab === 'formation' && (
+          <FormationEditor
+            config={currentConfig || DEFAULT_PROGRAM_CONFIG}
+            onSaved={(cfg) => onConfigUpdated?.(cfg)}
+          />
+        )}
+
+        {/* ==================================================================== */}
+        {/* TAB 2: SALES HISTORY & PER-FORMATION ANALYTICS */}
+        {/* ==================================================================== */}
+        {currentTab === 'dashboard' && adminStats && (
+          <div className="space-y-5">
+            {/* Revenue snapshot */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+              <div className="p-5 rounded-xl bg-[#F8F9FA] dark:bg-[#0A0A0A] border border-slate-200 dark:border-[#1E1E1E] shadow-xs">
+                <div className="text-[10px] font-bold font-montserrat uppercase tracking-wider text-emerald-600 dark:text-emerald-400 mb-1">Recettes confirmées</div>
+                <div className="text-3xl font-black font-mono tabular-nums text-slate-900 dark:text-white">
+                  ${adminStats.active.revenueConfirmedUsd.toFixed(2)}
+                </div>
+                <div className="text-[11px] text-slate-500 mt-1">{adminStats.active.confirmed} billet(s) confirmé(s)</div>
+              </div>
+              <div className="p-5 rounded-xl bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-900/60 shadow-xs">
+                <div className="text-[10px] font-bold font-montserrat uppercase tracking-wider text-amber-600 dark:text-amber-400 mb-1">Chiffre en instance</div>
+                <div className="text-3xl font-black font-mono tabular-nums text-amber-600 dark:text-amber-400">
+                  ${adminStats.active.revenuePipelineUsd.toFixed(2)}
+                </div>
+                <div className="text-[11px] text-amber-700/70 dark:text-amber-500/70 mt-1">{adminStats.active.pending} paiement(s) à vérifier</div>
+              </div>
+              <div className="p-5 rounded-xl bg-[#F8F9FA] dark:bg-[#0A0A0A] border border-slate-200 dark:border-[#1E1E1E] shadow-xs">
+                <div className="text-[10px] font-bold font-montserrat uppercase tracking-wider text-slate-500 mb-1">Taux de conversion</div>
+                <div className="text-3xl font-black font-mono tabular-nums text-slate-900 dark:text-white">
+                  {adminStats.active.total > 0 ? Math.round((adminStats.active.confirmed / adminStats.active.total) * 100) : 0}%
+                </div>
+                <div className="text-[11px] text-slate-500 mt-1">{adminStats.active.total} inscription(s) au total</div>
+              </div>
+              <div className="p-5 rounded-xl bg-[#E50914]/5 border border-[#E50914]/30 shadow-xs">
+                <div className="text-[10px] font-bold font-montserrat uppercase tracking-wider text-[#E50914] mb-1">Formation active</div>
+                <div className="text-sm font-bold font-montserrat text-slate-900 dark:text-white truncate">{adminStats.activeFormation.title}</div>
+                <div className="text-[11px] text-slate-500 mt-1">{adminStats.activeFormation.dateDisplay} · ${adminStats.activeFormation.ticketPriceUsd.toFixed(2)}/billet</div>
+              </div>
+            </div>
+
+            {/* 14-day registrations chart */}
+            <div className="p-5 rounded-xl bg-[#F8F9FA] dark:bg-[#0A0A0A] border border-slate-200 dark:border-[#1E1E1E] shadow-xs">
+              <div className="flex items-center justify-between mb-4">
+                <div className="text-xs font-bold font-montserrat text-slate-900 dark:text-white uppercase tracking-wider">Inscriptions · 14 derniers jours</div>
+                <div className="text-[11px] text-slate-500 font-inter">Somme : {adminStats.active.daily.reduce((s, d) => s + d.count, 0)}</div>
+              </div>
+              <div className="flex items-end gap-1.5 h-28">
+                {adminStats.active.daily.map(d => {
+                  const maxCount = Math.max(...adminStats.active.daily.map(x => x.count), 1);
+                  return (
+                    <div key={d.date} className="flex-1 flex flex-col items-center gap-1">
+                      <div
+                        className={`w-full rounded-t-md transition-all ${d.count > 0 ? 'bg-[#E50914]/80' : 'bg-slate-200 dark:bg-[#1A1A1A]'}`}
+                        style={{ height: `${Math.max(d.count > 0 ? (d.count / maxCount) * 100 : 4, 4) * 0.9}%` }}
+                        title={`${d.date} : ${d.count}`}
+                      />
+                      <span className="text-[8px] text-slate-400 font-mono">{d.date.slice(5)}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Operators breakdown */}
+            <div className="p-5 rounded-xl bg-[#F8F9FA] dark:bg-[#0A0A0A] border border-slate-200 dark:border-[#1E1E1E] shadow-xs">
+              <div className="text-xs font-bold font-montserrat text-slate-900 dark:text-white uppercase tracking-wider mb-4">Répartition Opérateurs Télécoms</div>
+              <div className="flex flex-wrap gap-2">
+                {Object.entries(adminStats.active.carriers).length === 0 && (
+                  <span className="text-xs text-slate-400 font-inter">Aucune donnée pour cette formation.</span>
+                )}
+                {Object.entries(adminStats.active.carriers).map(([carrier, count]) => (
+                  <div key={carrier} className="px-3.5 py-2 rounded-lg bg-white dark:bg-[#0E0E0E] border border-slate-200 dark:border-[#1E1E1E] flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full bg-[#E50914]" />
+                    <span className="text-xs text-slate-700 dark:text-slate-300 font-inter">{carrier}</span>
+                    <span className="font-mono text-xs font-bold text-[#E50914]">{count}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Per-formation sales history */}
+            <div className="rounded-xl bg-white dark:bg-[#0A0A0A] border border-slate-200 dark:border-[#1E1E1E] overflow-hidden shadow-xs">
+              <div className="px-5 py-4 bg-slate-50 dark:bg-[#050505] border-b border-slate-200 dark:border-[#1E1E1E]">
+                <div className="text-xs font-bold font-montserrat text-slate-900 dark:text-white uppercase tracking-wider">Historique des Ventes · Toutes Formations</div>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs">
+                  <thead className="border-b border-slate-200 dark:border-[#1E1E1E] text-slate-500 dark:text-slate-400 uppercase font-montserrat text-[10px]">
+                    <tr>
+                      <th className="px-4 py-3">Formation</th>
+                      <th className="px-4 py-3">Tarif</th>
+                      <th className="px-4 py-3">Confirmés</th>
+                      <th className="px-4 py-3">En attente</th>
+                      <th className="px-4 py-3">Rejetés/Révoqués</th>
+                      <th className="px-4 py-3">Recettes</th>
+                      <th className="px-4 py-3">Dernière inscription</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 dark:divide-[#1A1A1A]">
+                    {adminStats.byFormation.map(f => (
+                      <tr key={f.id} className="hover:bg-slate-50 dark:hover:bg-[#0E0E0E] transition-colors">
+                        <td className="px-4 py-3.5">
+                          <div className="flex items-center gap-2">
+                            {f.isActive && <span className="px-1.5 py-0.5 rounded bg-[#E50914] text-white text-[9px] font-bold uppercase">Active</span>}
+                            <span className="font-semibold text-slate-900 dark:text-white truncate max-w-[220px]">{f.title}</span>
+                          </div>
+                          <div className="text-[10px] text-slate-400 mt-0.5">{f.dateDisplay}</div>
+                        </td>
+                        <td className="px-4 py-3.5 font-mono text-slate-700 dark:text-slate-300">${f.ticketPriceUsd.toFixed(2)}</td>
+                        <td className="px-4 py-3.5 font-mono font-bold text-emerald-600 dark:text-emerald-400">{f.confirmed}</td>
+                        <td className="px-4 py-3.5 font-mono text-amber-600 dark:text-amber-400">{f.pending}</td>
+                        <td className="px-4 py-3.5 font-mono text-slate-500">{f.rejected} / {f.revoked}</td>
+                        <td className="px-4 py-3.5 font-mono font-bold text-[#E50914]">
+                          ${f.revenueConfirmedUsd.toFixed(2)}
+                          {f.revenuePipelineUsd > 0 && <span className="text-[10px] text-amber-500 font-normal block">+${f.revenuePipelineUsd.toFixed(2)} en instance</span>}
+                        </td>
+                        <td className="px-4 py-3.5 text-slate-500 dark:text-slate-400 font-inter">
+                          {f.lastRegistrationAt ? new Date(f.lastRegistrationAt).toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' }) : '—'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {currentTab === 'dashboard' && !adminStats && (
+          <div className="text-xs text-slate-400 py-10 text-center font-inter">
+            Analyse commerciale indisponible — reconnectez-vous à la console.
+          </div>
+        )}
+
+        {/* ==================================================================== */}
+        {/* TAB 3: PARTICIPANTS REGISTER & ORANGE MONEY MANAGEMENT */}
         {/* ==================================================================== */}
         {currentTab === 'participants' && (
           <div className="space-y-4">
@@ -700,7 +891,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToClient }) => {
                             <td className="px-4 py-3.5">
                               <div className="font-semibold text-slate-900 dark:text-white font-poppins flex items-center gap-1.5">
                                 <span className="w-2 h-2 rounded-full bg-[#E50914]" />
-                                <span>Orange Money · $20.00</span>
+                                <span>Orange Money · ${p.priceUsd.toFixed(2)}</span>
                               </div>
                               <div className="font-mono text-[11px] text-slate-500 dark:text-slate-400">
                                 Réf: {sanitizeSafeText(p.transactionReference)}
@@ -778,7 +969,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToClient }) => {
                                 {p.status === 'CONFIRMED' && (
                                   <>
                                     <button
-                                      onClick={() => downloadTicketPDF(p)}
+                                      onClick={() => downloadTicketPDF(p, formationInfo)}
                                       className="px-2.5 py-1.5 text-xs font-semibold text-slate-700 dark:text-slate-200 bg-slate-100 hover:bg-slate-200 dark:bg-[#161616] dark:hover:bg-[#222222] border border-slate-300 dark:border-[#2E2E2E] rounded transition-colors flex items-center gap-1 cursor-pointer"
                                       title="Télécharger le pass officiel PDF PIGA STUDIO"
                                     >
@@ -787,7 +978,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToClient }) => {
                                     </button>
 
                                     <a
-                                      href={generateWhatsAppConfirmationUrl(p).url}
+                                      href={generateWhatsAppConfirmationUrl(p, formationInfo).url}
                                       target="_blank"
                                       rel="noopener noreferrer"
                                       className="px-2.5 py-1.5 text-xs font-semibold text-[#10B981] bg-[#10B981]/10 hover:bg-[#10B981]/20 border border-[#10B981]/30 rounded transition-colors flex items-center gap-1 cursor-pointer"
@@ -802,7 +993,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToClient }) => {
                                 {/* If REVOKED: Contact Client Action */}
                                 {p.status === 'REVOKED' && (
                                   <a
-                                    href={generateWhatsAppRevocationUrl(p, p.revocationReason || 'Difficulté de confirmation Orange Money').url}
+                                    href={generateWhatsAppRevocationUrl(p, p.revocationReason || 'Difficulté de confirmation Orange Money', formationInfo).url}
                                     target="_blank"
                                     rel="noopener noreferrer"
                                     className="px-2.5 py-1.5 text-xs font-bold text-white bg-[#E50914] hover:bg-[#C80711] rounded transition-colors flex items-center gap-1 cursor-pointer shadow-xs"
@@ -923,7 +1114,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToClient }) => {
                       </div>
                       <div>
                         <span className="text-slate-500 dark:text-slate-400 block mb-1">Session :</span>
-                        <span className="text-slate-900 dark:text-white font-medium">Vendredi 13 Novembre 2026</span>
+                        <span className="text-slate-900 dark:text-white font-medium">{resolvedInfo.dateDisplay}</span>
                       </div>
                       <div>
                         <span className="text-slate-500 dark:text-slate-400 block mb-1">Statut :</span>
@@ -1047,7 +1238,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToClient }) => {
             <div className="p-6 space-y-4 text-xs font-inter text-slate-700 dark:text-slate-300">
               <p className="leading-relaxed">
                 Vous vous apprêtez à révoquer cette réservation en cas d'impossibilité de confirmer le paiement Orange Money. 
-                Le client sera immédiatement contacté pour régulariser son transfert vers le numéro officiel <strong>{PIGA_ORANGE_MONEY_DISPLAY}</strong>.
+                Le client sera immédiatement contacté pour régulariser son transfert vers le numéro officiel <strong>{resolvedInfo.orangeMoneyNumber}</strong>.
               </p>
 
               <div>

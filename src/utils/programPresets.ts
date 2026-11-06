@@ -8,7 +8,21 @@
  * capacity, curriculum modules, and DNA terms.
  */
 
-import type { ProgramConfig } from '../types/index.ts';
+import type { ProgramConfig, ProgramModuleIcon } from '../types/index.ts';
+
+/** Icon palette available for curriculum modules in the Formation Editor */
+export const PROGRAM_MODULE_ICONS: { id: ProgramModuleIcon; label: string }[] = [
+  { id: 'Network', label: 'Réseau / Architecture' },
+  { id: 'ShieldAlert', label: 'Sécurité' },
+  { id: 'Server', label: 'Serveur / Infra' },
+  { id: 'QrCode', label: 'QR Code / Billetterie' },
+  { id: 'Cpu', label: 'Calcul / IA' },
+  { id: 'Brain', label: 'Intelligence / Agents' },
+  { id: 'Workflow', label: 'Workflow / Automatisation' },
+  { id: 'Code', label: 'Code / Développement' },
+  { id: 'Terminal', label: 'Terminal / Garde-fous' },
+  { id: 'Database', label: 'Base de données' }
+];
 
 export const DEFAULT_PROGRAM_CONFIG: ProgramConfig = {
   id: 'arsenal-agentique-2026',
@@ -69,7 +83,35 @@ export const DEFAULT_PROGRAM_CONFIG: ProgramConfig = {
     '3. Éthique et Sécurité Offensive : Les connaissances transmises (défenses contre les prompt injections, contournements et audit de sécurité d’agents) doivent être mobilisées exclusivement dans le cadre de la protection défensive des systèmes d’information d’entreprises.',
     '4. Révocation de Billet : Tout manquement à ces règles entraînera l’annulation immédiate du billet cryptographique AES-256-GCM sans remboursement et des poursuites légales sous la juridiction compétente en RDC.'
   ],
+  vipWhatsAppUrl: 'https://chat.whatsapp.com/PigaArsenalAgentique2026',
   updatedAt: new Date().toISOString()
+};
+
+/** Blank starting point used when the admin launches a brand-new formation */
+export const BLANK_FORMATION_TEMPLATE: Omit<ProgramConfig, 'id' | 'updatedAt'> = {
+  title: 'Nouvelle Formation',
+  tagline: '',
+  kicker: 'PIGA STUDIO TECH MEDIA',
+  dateDisplay: 'Date à confirmer',
+  timeDisplay: '',
+  locationDisplay: '',
+  description: '',
+  ticketPriceUsd: 20.00,
+  totalCapacity: 50,
+  status: 'COMING_SOON',
+  orangeMoneyNumber: DEFAULT_PROGRAM_CONFIG.orangeMoneyNumber,
+  orangeMoneyHolder: DEFAULT_PROGRAM_CONFIG.orangeMoneyHolder,
+  directionEmail: DEFAULT_PROGRAM_CONFIG.directionEmail,
+  directionPhone: DEFAULT_PROGRAM_CONFIG.directionPhone,
+  heroImageUrl: '',
+  auditoriumImageUrl: '',
+  modules: [],
+  ndaTitle: DEFAULT_PROGRAM_CONFIG.ndaTitle,
+  ndaClauses: [...DEFAULT_PROGRAM_CONFIG.ndaClauses],
+  curriculumTitle: '',
+  curriculumIntro: '',
+  footerAbout: '',
+  vipWhatsAppUrl: DEFAULT_PROGRAM_CONFIG.vipWhatsAppUrl
 };
 
 export const TRAINING_PRESETS: { id: string; name: string; badge: string; config: Partial<ProgramConfig> }[] = [

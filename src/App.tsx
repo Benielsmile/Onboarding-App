@@ -15,6 +15,7 @@ import { ClientFooter } from './client/ClientFooter.tsx';
 import { AdminPortal } from './admin/AdminPortal.tsx';
 import { ThemeProvider } from './context/ThemeContext.tsx';
 import { api } from './services/api.ts';
+import { BrandLoader } from './components/BrandLoader.tsx';
 import { registerPwaServiceWorker } from './utils/pwaNotifications.ts';
 import { DEFAULT_PROGRAM_CONFIG } from './utils/programPresets.ts';
 import type { InventoryStatus, ProgramConfig } from './types/index.ts';
@@ -22,6 +23,7 @@ import type { InventoryStatus, ProgramConfig } from './types/index.ts';
 function AppContent() {
   const [isAdminView, setIsAdminView] = useState(false);
   const [isOnboardingOpen, setIsOnboardingOpen] = useState(false);
+  const [isBooting, setIsBooting] = useState(true);
 
   // Dynamic Formation Configuration managed by Admin Dashboard
   const [programConfig, setProgramConfig] = useState<ProgramConfig>(DEFAULT_PROGRAM_CONFIG);
@@ -71,8 +73,24 @@ function AppContent() {
     }
   };
 
+  // Brand boot: hydrate config + inventory behind the PIGA splash loader
   useEffect(() => {
-    refreshAllData();
+    let alive = true;
+    const startedAt = Date.now();
+    const boot = async () => {
+      try {
+        await refreshAllData();
+      } catch {
+        // Safe fallback: DEFAULT_PROGRAM_CONFIG already rendered
+      }
+      // Enforce a minimum splash so the brand reveal feels intentional
+      const remaining = Math.max(0, 900 - (Date.now() - startedAt));
+      await new Promise(resolve => setTimeout(resolve, remaining));
+      if (alive) setIsBooting(false);
+    };
+    boot();
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const openAdmin = () => {
@@ -94,7 +112,8 @@ function AppContent() {
   };
 
   return (
-    <div className="min-h-screen bg-white dark:bg-[#000000] text-slate-900 dark:text-slate-100 flex flex-col font-inter selection:bg-[#E50914]/30 selection:text-white transition-colors duration-200">
+    <div id="top" className="min-h-screen bg-white dark:bg-[#000000] text-slate-900 dark:text-slate-100 flex flex-col font-inter selection:bg-[#E50914]/30 selection:text-white transition-colors duration-200">
+      <BrandLoader visible={isBooting} status="Synchronisation de la formation…" />
       {isAdminView ? (
         // Dedicated Isolated Admin Portal (with CMS Formation Editor tab)
         <AdminPortal 

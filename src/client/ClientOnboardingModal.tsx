@@ -33,6 +33,37 @@ interface ClientOnboardingModalProps {
   onSuccess: () => void;
 }
 
+/**
+ * Canvas compression pipeline for Orange Money proof screenshots.
+ * Vercel serverless functions cap the request body at ~4.5 MB: raw phone
+ * screenshots (up to 10 MB) would silently fail on production. This keeps
+ * the evidence readable (recto of the transfer receipt) at a deploy-safe size.
+ */
+async function compressImageFile(file: File, maxEdge = 1400, quality = 0.72): Promise<string> {
+  const rawDataUrl = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(new Error('read_failed'));
+    reader.readAsDataURL(file);
+  });
+
+  const image = await new Promise<HTMLImageElement>((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error('decode_failed'));
+    img.src = rawDataUrl;
+  });
+
+  const scale = Math.min(1, maxEdge / Math.max(image.width, image.height));
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.max(1, Math.round(image.width * scale));
+  canvas.height = Math.max(1, Math.round(image.height * scale));
+  canvas.getContext('2d')?.drawImage(image, 0, 0, canvas.width, canvas.height);
+
+  const compressed = canvas.toDataURL('image/jpeg', quality);
+  return compressed.length < rawDataUrl.length ? compressed : rawDataUrl;
+}
+
 export const ClientOnboardingModal: React.FC<ClientOnboardingModalProps> = ({
   programConfig,
   isOpen,
@@ -95,7 +126,7 @@ export const ClientOnboardingModal: React.FC<ClientOnboardingModalProps> = ({
                        email.includes('@') && email.includes('.') && 
                        phoneValidation.isValid;
 
-  const processFile = (file: File) => {
+  const processFile = async (file: File) => {
     if (!file.type.startsWith('image/')) {
       setSubmissionError('Seules les images (JPEG, PNG, WebP) de votre preuve Orange Money sont acceptées.');
       return;
@@ -108,11 +139,18 @@ export const ClientOnboardingModal: React.FC<ClientOnboardingModalProps> = ({
     setScreenshotName(file.name);
     setSubmissionError(null);
 
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      setScreenshotBase64(e.target?.result as string);
-    };
-    reader.readAsDataURL(file);
+    // Vercel serverless cap le body JSON à ~4,5 Mo : on compresse systématiquement
+    // la capture d'écran côté client (canvas -> JPEG, max 1400px, qualité 0.72)
+    // afin de rester sous la limite même sur les gros screenshots Smartphone.
+    try {
+      const compressed = await compressImageFile(file);
+      setScreenshotBase64(compressed);
+    } catch {
+      // Canvas indisponible (device exotique) : fallback sur lecture brute
+      const reader = new FileReader();
+      reader.onload = (e) => setScreenshotBase64(e.target?.result as string);
+      reader.readAsDataURL(file);
+    }
   };
 
   const handleCopyNumber = () => {

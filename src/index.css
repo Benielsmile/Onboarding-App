@@ -47,3 +47,46 @@
     font-family: 'JetBrains Mono', monospace;
   }
 }
+
+/* ============================================================================
+   BRAND BOOT LOADER (PIGA splash screen)
+   Elegant brand boot: logo rise-in, shimmering progress rail, soft exit fade.
+   ============================================================================ */
+@keyframes piga-loader-rise {
+  0% { opacity: 0; transform: translateY(14px) scale(0.96); }
+  60% { opacity: 1; transform: translateY(-2px) scale(1.01); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes piga-loader-fade-out {
+  from { opacity: 1; visibility: visible; }
+  to { opacity: 0; visibility: hidden; }
+}
+
+@keyframes piga-loader-rail {
+  0% { transform: translateX(-110%); }
+  100% { transform: translateX(320%); }
+}
+
+.piga-loader-rise {
+  animation: piga-loader-rise 0.9s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.piga-loader-exit {
+  animation: piga-loader-fade-out 0.55s ease forwards;
+}
+
+.piga-loader-rail::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  width: 40%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, transparent, var(--piga-red), transparent);
+  animation: piga-loader-rail 1.4s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .piga-loader-rise { animation: none; opacity: 1; }
+  .piga-loader-rail::before { animation-duration: 2.8s; }
+}
