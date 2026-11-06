@@ -1,0 +1,8 @@
+{
+  "name": "Arsenal Agentique — Onboarding & Cryptographic Ticketing",
+  "description": "High-security participant onboarding, zero-trust MoMo payment validation, and AES-256-GCM cryptographic ticketing for the Arsenal Agentique Masterclass on November 13, 2026.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
