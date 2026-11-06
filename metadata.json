@@ -1,6 +1,6 @@
 {
-  "name": "Arsenal Agentique — Onboarding & Cryptographic Ticketing",
-  "description": "High-security participant onboarding, zero-trust MoMo payment validation, and AES-256-GCM cryptographic ticketing for the Arsenal Agentique Masterclass on November 13, 2026.",
+  "name": "PIGA STUDIO — Arsenal Agentique & Billetterie Orange Money",
+  "description": "The AI Venture Studio & Tech Media. Plateforme d'onboarding, encaissement exclusif Orange Money (+243 803 240 289) et billetterie cryptographique AES-256-GCM.",
   "requestFramePermissions": [],
   "majorCapabilities": [
     "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"

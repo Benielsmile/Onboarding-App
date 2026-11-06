@@ -17,9 +17,11 @@ import type {
   AuditLogEntry, 
   TicketPayload, 
   InventoryStatus,
-  MobileMoneyProvider 
+  MobileMoneyProvider,
+  ProgramConfig
 } from './src/types/index.ts';
 import { cleanAndValidateDRCPhone } from './src/utils/drcPhoneValidator.ts';
+import { DEFAULT_PROGRAM_CONFIG, TRAINING_PRESETS } from './src/utils/programPresets.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -36,14 +38,15 @@ class TransactionalStore {
   private participants: Map<string, Participant> = new Map();
   private auditLogs: AuditLogEntry[] = [];
   private proofsStorage: Map<string, { data: string; mimeType: string }> = new Map();
+  private programConfig: ProgramConfig = { ...DEFAULT_PROGRAM_CONFIG };
   
   // Inventory state with concurrency versioning
   private inventory: InventoryStatus = {
-    totalCapacity: 80,
+    totalCapacity: DEFAULT_PROGRAM_CONFIG.totalCapacity,
     confirmedSeats: 0,
     pendingVerifications: 0,
-    availableSeats: 80,
-    ticketPriceUsd: FIXED_TICKET_PRICE_USD,
+    availableSeats: DEFAULT_PROGRAM_CONFIG.totalCapacity,
+    ticketPriceUsd: DEFAULT_PROGRAM_CONFIG.ticketPriceUsd,
   };
 
   // Mutex lock for atomic registration (simulates SELECT FOR UPDATE)
@@ -124,7 +127,7 @@ class TransactionalStore {
         phoneMasked: this.maskPhone(phoneValidation.formattedInternational),
         networkCarrier: phoneValidation.carrier,
         status: 'PENDING',
-        priceUsd: FIXED_TICKET_PRICE_USD, // Strictly server-enforced $20 USD
+        priceUsd: this.programConfig.ticketPriceUsd, // Dynamic server-enforced ticket price
         paymentProvider: req.paymentProvider,
         transactionReference: req.transactionReference ? req.transactionReference.trim() : 'N/A',
         proofFileName: req.proofFileName || 'screenshot_momo.jpg',
@@ -222,6 +225,31 @@ class TransactionalStore {
     return participant;
   }
 
+  revokeReservation(participantId: string, adminId: string, reason: string, ip: string, ua: string): Participant {
+    const participant = this.participants.get(participantId);
+    if (!participant) {
+      throw new Error('PARTICIPANT_NOT_FOUND');
+    }
+
+    participant.status = 'REVOKED';
+    participant.revokedAt = new Date().toISOString();
+    participant.revocationReason = reason;
+    this.recalculateInventory();
+
+    this.addAuditLog({
+      id: crypto.randomUUID(),
+      adminId,
+      actionType: 'REVOKE_RESERVATION',
+      participantId: participant.id,
+      timestamp: new Date().toISOString(),
+      userAgent: ua,
+      ipAddress: ip,
+      details: { reason, note: 'Réservation révoquée pour non-concordance Orange Money' }
+    });
+
+    return participant;
+  }
+
   getParticipants(): Participant[] {
     return Array.from(this.participants.values()).sort((a, b) => 
       new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
@@ -242,6 +270,52 @@ class TransactionalStore {
 
   getInventory(): InventoryStatus {
     return { ...this.inventory };
+  }
+
+  getProgramConfig(): ProgramConfig {
+    return { ...this.programConfig };
+  }
+
+  updateProgramConfig(newConfig: Partial<ProgramConfig>, adminId: string, clientIp: string, userAgent: string): ProgramConfig {
+    this.programConfig = {
+      ...this.programConfig,
+      ...newConfig,
+      updatedAt: new Date().toISOString(),
+      updatedBy: adminId
+    };
+
+    if (typeof newConfig.ticketPriceUsd === 'number' && !isNaN(newConfig.ticketPriceUsd)) {
+      this.inventory.ticketPriceUsd = newConfig.ticketPriceUsd;
+    }
+    if (typeof newConfig.totalCapacity === 'number' && !isNaN(newConfig.totalCapacity)) {
+      this.inventory.totalCapacity = newConfig.totalCapacity;
+    }
+    this.recalculateInventory();
+
+    this.addAuditLog({
+      id: crypto.randomUUID(),
+      adminId,
+      actionType: 'UPDATE_PROGRAM_CONFIG',
+      timestamp: new Date().toISOString(),
+      userAgent,
+      ipAddress: clientIp,
+      details: {
+        title: this.programConfig.title,
+        ticketPriceUsd: this.programConfig.ticketPriceUsd,
+        totalCapacity: this.programConfig.totalCapacity,
+        dateDisplay: this.programConfig.dateDisplay
+      }
+    });
+
+    return { ...this.programConfig };
+  }
+
+  loadPreset(presetId: string, adminId: string, clientIp: string, userAgent: string): ProgramConfig {
+    const preset = TRAINING_PRESETS.find(p => p.id === presetId);
+    if (!preset) {
+      throw new Error(`Modèle de formation introuvable: ${presetId}`);
+    }
+    return this.updateProgramConfig(preset.config, adminId, clientIp, userAgent);
   }
 
   getProof(storagePath: string) {
@@ -330,15 +404,15 @@ class TransactionalStore {
       networkCarrier: 'Vodacom (M-Pesa)',
       status: 'CONFIRMED',
       priceUsd: 20.00,
-      paymentProvider: 'M-PESA',
-      transactionReference: 'MP-2026-994821',
-      proofFileName: 'recu_mpesa_mwamba.jpg',
+      paymentProvider: 'ORANGE_MONEY',
+      transactionReference: 'OM-2026-994821',
+      proofFileName: 'recu_orange_mwamba.jpg',
       proofStoragePath: 'proofs/seed/dieudonne.jpg',
       ndaAccepted: true,
       ndaAcceptedAt: '2026-11-04T10:15:00Z',
       createdAt: '2026-11-04T10:14:00Z',
       confirmedAt: '2026-11-04T10:30:00Z',
-      ticketCode: 'AA-2026-E49A21-321',
+      ticketCode: 'PIGA-AA-2026-E49A21-321',
     };
     demoConfirmed.cryptoToken = this.encryptAES256GCM({
       t: demoConfirmed.ticketCode!,
@@ -412,6 +486,58 @@ async function createApplication() {
   // 1. Get Inventory Status
   app.get('/api/stats', (req: Request, res: Response) => {
     res.json(store.getInventory());
+  });
+
+  app.get('/api/inventory', (req: Request, res: Response) => {
+    res.json(store.getInventory());
+  });
+
+  // 1b. Public: Get Dynamic Program Configuration
+  app.get('/api/program-config', (req: Request, res: Response) => {
+    res.json(store.getProgramConfig());
+  });
+
+  // 1c. Public: Get Available Training Presets
+  app.get('/api/program-presets', (req: Request, res: Response) => {
+    res.json(TRAINING_PRESETS);
+  });
+
+  // 1d. Admin: Update Dynamic Program Configuration
+  app.post('/api/admin/program-config', (req: Request, res: Response) => {
+    try {
+      const { config, adminId = 'ADM-2026-CHIEF' } = req.body;
+      const clientIp = (req.headers['x-forwarded-for'] as string)?.split(',')[0] || req.socket.remoteAddress || '127.0.0.1';
+      const userAgent = req.headers['user-agent'] || 'Unknown-Client';
+
+      if (!config || typeof config !== 'object') {
+        return res.status(400).json({ success: false, message: 'Configuration invalide fournie.' });
+      }
+
+      const updated = store.updateProgramConfig(config, adminId, clientIp, userAgent);
+      return res.json({ success: true, config: updated });
+    } catch (err: unknown) {
+      console.error('[UPDATE PROGRAM CONFIG ERROR]:', err);
+      return res.status(400).json({ success: false, message: err instanceof Error ? err.message : 'Erreur lors de la mise à jour.' });
+    }
+  });
+
+  // 1e. Admin: Load Curated Training Preset
+  app.post('/api/admin/program-preset', (req: Request, res: Response) => {
+    try {
+      const { presetId, adminId = 'ADM-2026-CHIEF' } = req.body;
+      const clientIp = (req.headers['x-forwarded-for'] as string)?.split(',')[0] || req.socket.remoteAddress || '127.0.0.1';
+      const userAgent = req.headers['user-agent'] || 'Unknown-Client';
+
+      if (!presetId) {
+        return res.status(400).json({ success: false, message: 'Identifiant du modèle manquant.' });
+      }
+
+      const updated = store.loadPreset(presetId, adminId, clientIp, userAgent);
+      return res.json({ success: true, config: updated });
+    } catch (err: unknown) {
+      console.error('[LOAD PRESET ERROR]:', err);
+      return res.status(400).json({ success: false, message: err instanceof Error ? err.message : 'Erreur lors du chargement.' });
+    }
   });
 
   // 2. Public Registration Endpoint (Zero-Trust Validation & Atomic Lock)
@@ -613,6 +739,21 @@ async function createApplication() {
     } catch (err) {
       console.error('[REJECT PAYMENT ERROR]:', err);
       return res.status(400).json({ success: false, message: 'Échec du rejet.' });
+    }
+  });
+
+  // 9b. Admin: Revoke Reservation (contact client for missing/invalid Orange Money proof)
+  app.post('/api/admin/revoke-reservation', (req: Request, res: Response) => {
+    try {
+      const { participantId, reason = 'Impossibilité de confirmer le paiement Orange Money (+243 803 240 289)', adminId = 'ADM-2026-CHIEF' } = req.body;
+      const clientIp = (req.headers['x-forwarded-for'] as string)?.split(',')[0] || req.socket.remoteAddress || '127.0.0.1';
+      const userAgent = req.headers['user-agent'] || 'Unknown-Client';
+
+      const updated = store.revokeReservation(participantId, adminId, reason, clientIp, userAgent);
+      return res.json({ success: true, participant: updated });
+    } catch (err) {
+      console.error('[REVOKE RESERVATION ERROR]:', err);
+      return res.status(400).json({ success: false, message: 'Échec de la révocation.' });
     }
   });
 

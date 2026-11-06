@@ -6,9 +6,9 @@
  * Strict TypeSafe integration across all frontend and backend communication layers.
  */
 
-export type ParticipantStatus = 'PENDING' | 'CONFIRMED' | 'REJECTED';
+export type ParticipantStatus = 'PENDING' | 'CONFIRMED' | 'REJECTED' | 'REVOKED';
 
-export type MobileMoneyProvider = 'M-PESA' | 'ORANGE_MONEY' | 'AIRTEL_MONEY';
+export type MobileMoneyProvider = 'ORANGE_MONEY';
 
 export interface Participant {
   id: string;
@@ -32,6 +32,8 @@ export interface Participant {
   cryptoToken?: string;
   confirmedAt?: string;
   adminNotes?: string;
+  revokedAt?: string;
+  revocationReason?: string;
 }
 
 export interface RegistrationRequest {
@@ -55,10 +57,46 @@ export interface RegistrationResponse {
   phoneFormatted?: string;
 }
 
+export type ProgramModuleIcon = 'Network' | 'ShieldAlert' | 'Server' | 'QrCode' | 'Cpu' | 'Brain' | 'Workflow' | 'Code' | 'Terminal' | 'Database';
+
+export interface ProgramModule {
+  id: string;
+  index: string; // e.g. "01", "02"
+  title: string;
+  highlight: string;
+  description: string;
+  iconName?: ProgramModuleIcon;
+}
+
+export interface ProgramConfig {
+  id: string;
+  title: string;
+  tagline: string;
+  kicker: string;
+  dateDisplay: string;
+  timeDisplay: string;
+  locationDisplay: string;
+  description: string;
+  ticketPriceUsd: number;
+  totalCapacity: number;
+  status: 'OPEN' | 'COMING_SOON' | 'SOLD_OUT';
+  orangeMoneyNumber: string;
+  orangeMoneyHolder: string;
+  directionEmail: string;
+  directionPhone: string;
+  heroImageUrl: string;
+  auditoriumImageUrl: string;
+  modules: ProgramModule[];
+  ndaTitle: string;
+  ndaClauses: string[];
+  updatedAt: string;
+  updatedBy?: string;
+}
+
 export interface AuditLogEntry {
   id: string;
   adminId: string;
-  actionType: 'CONFIRM_PAYMENT' | 'REJECT_PAYMENT' | 'DOWNLOAD_TICKET' | 'VIEW_PROOF' | 'RESEND_WHATSAPP' | 'ADMIN_LOGIN';
+  actionType: 'CONFIRM_PAYMENT' | 'REJECT_PAYMENT' | 'REVOKE_RESERVATION' | 'DOWNLOAD_TICKET' | 'VIEW_PROOF' | 'RESEND_WHATSAPP' | 'ADMIN_LOGIN' | 'UPDATE_PROGRAM_CONFIG';
   participantId?: string;
   timestamp: string;
   userAgent: string;

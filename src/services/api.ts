@@ -12,9 +12,11 @@ import type {
   RegistrationResponse, 
   AuditLogEntry, 
   InventoryStatus,
-  CryptographicTokenVerification 
+  CryptographicTokenVerification,
+  ProgramConfig
 } from '../types/index.ts';
 import { decryptAndVerifyTicketToken } from '../utils/cryptoSecurity.ts';
+import { DEFAULT_PROGRAM_CONFIG } from '../utils/programPresets.ts';
 
 /**
  * Context-specific escaping helper for UI rendering to prevent Stored XSS
@@ -139,6 +141,22 @@ export const api = {
   },
 
   /**
+   * Revokes participant reservation and triggers direct client outreach via WhatsApp/Email
+   */
+  async revokeReservation(participantId: string, reason: string): Promise<Participant> {
+    const res = await fetch('/api/admin/revoke-reservation', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ participantId, reason, adminId: 'ADM-2026-CHIEF' })
+    });
+    const data = await res.json();
+    if (!res.ok || !data.success) {
+      throw new Error(data.message || 'Échec de la révocation de la réservation.');
+    }
+    return data.participant;
+  },
+
+  /**
    * Retrieves immutable audit log stream
    */
   async getAuditLogs(): Promise<AuditLogEntry[]> {
@@ -179,5 +197,63 @@ export const api = {
     }
 
     return await decryptAndVerifyTicketToken(token);
+  },
+
+  /**
+   * Fetches the dynamic landing page and training program configuration
+   */
+  async getProgramConfig(): Promise<ProgramConfig> {
+    try {
+      const res = await fetch('/api/program-config');
+      if (!res.ok) throw new Error('Erreur de chargement');
+      return await res.json();
+    } catch {
+      return DEFAULT_PROGRAM_CONFIG;
+    }
+  },
+
+  /**
+   * Fetches the list of curated training presets
+   */
+  async getProgramPresets(): Promise<any[]> {
+    try {
+      const res = await fetch('/api/program-presets');
+      if (!res.ok) return [];
+      return await res.json();
+    } catch {
+      return [];
+    }
+  },
+
+  /**
+   * Updates the live training program configuration from Admin Dashboard
+   */
+  async updateProgramConfig(config: Partial<ProgramConfig>, adminId = 'ADM-2026-CHIEF'): Promise<{ success: boolean; config: ProgramConfig }> {
+    const res = await fetch('/api/admin/program-config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ config, adminId })
+    });
+    const data = await res.json();
+    if (!res.ok || !data.success) {
+      throw new Error(data.message || 'Échec de la mise à jour de la configuration de formation.');
+    }
+    return data;
+  },
+
+  /**
+   * Loads a pre-packaged training preset from Admin Dashboard
+   */
+  async loadProgramPreset(presetId: string, adminId = 'ADM-2026-CHIEF'): Promise<{ success: boolean; config: ProgramConfig }> {
+    const res = await fetch('/api/admin/program-preset', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ presetId, adminId })
+    });
+    const data = await res.json();
+    if (!res.ok || !data.success) {
+      throw new Error(data.message || 'Échec du chargement du modèle de formation.');
+    }
+    return data;
   }
 };

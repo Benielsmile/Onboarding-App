@@ -2,52 +2,53 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  * 
- * Arsenal Agentique - Root Application Component
- * Masterclass Onboarding & Cryptographic Ticketing System (November 13, 2026)
+ * PIGA STUDIO — Dynamic Training Platform & Billetterie Orange Money
+ * Root Application Router with ThemeProvider & Dynamic Formation Engine
  */
 
 import React, { useState, useEffect } from 'react';
-import { Header } from './components/Header.tsx';
-import { HeroSection } from './components/HeroSection.tsx';
-import { CurriculumOverview } from './components/CurriculumOverview.tsx';
-import { OnboardingFlow } from './components/OnboardingFlow.tsx';
-import { AdminDashboard } from './components/AdminDashboard.tsx';
-import { TicketVerificationView } from './components/TicketVerificationView.tsx';
-import { Footer } from './components/Footer.tsx';
+import { ClientHeader } from './client/ClientHeader.tsx';
+import { ClientHero } from './client/ClientHero.tsx';
+import { ClientCurriculum } from './client/ClientCurriculum.tsx';
+import { ClientOnboardingModal } from './client/ClientOnboardingModal.tsx';
+import { ClientFooter } from './client/ClientFooter.tsx';
+import { AdminPortal } from './admin/AdminPortal.tsx';
+import { ThemeProvider } from './context/ThemeContext.tsx';
 import { api } from './services/api.ts';
-import type { InventoryStatus } from './types/index.ts';
+import { registerPwaServiceWorker } from './utils/pwaNotifications.ts';
+import { DEFAULT_PROGRAM_CONFIG } from './utils/programPresets.ts';
+import type { InventoryStatus, ProgramConfig } from './types/index.ts';
 
-export default function App() {
-  const [currentView, setCurrentView] = useState<'home' | 'admin' | 'verify'>('home');
+function AppContent() {
+  const [isAdminView, setIsAdminView] = useState(false);
   const [isOnboardingOpen, setIsOnboardingOpen] = useState(false);
-  const [urlToken, setUrlToken] = useState<string>('');
-  
+
+  // Dynamic Formation Configuration managed by Admin Dashboard
+  const [programConfig, setProgramConfig] = useState<ProgramConfig>(DEFAULT_PROGRAM_CONFIG);
+
   const [inventory, setInventory] = useState<InventoryStatus>({
-    totalCapacity: 80,
+    totalCapacity: DEFAULT_PROGRAM_CONFIG.totalCapacity,
     confirmedSeats: 1,
     pendingVerifications: 1,
-    availableSeats: 78,
-    ticketPriceUsd: 20.00
+    availableSeats: DEFAULT_PROGRAM_CONFIG.totalCapacity - 2,
+    ticketPriceUsd: DEFAULT_PROGRAM_CONFIG.ticketPriceUsd
   });
 
-  // URL Routing Sync
+  // Register PWA Service Worker on load
+  useEffect(() => {
+    registerPwaServiceWorker();
+  }, []);
+
+  // Sync route and hash for Admin vs Client
   useEffect(() => {
     const handleLocationChange = () => {
-      const path = window.location.pathname;
       const hash = window.location.hash;
-      const params = new URLSearchParams(window.location.search);
+      const path = window.location.pathname;
 
-      if (path.startsWith('/admin') || hash === '#admin') {
-        setCurrentView('admin');
-      } else if (path.startsWith('/verify') || hash.startsWith('#verify') || params.has('verify') || params.has('token')) {
-        const token = path.replace('/verify/', '').replace('/verify', '') || 
-                      params.get('verify') || 
-                      params.get('token') || 
-                      hash.replace('#verify/', '').replace('#verify', '');
-        setUrlToken(token);
-        setCurrentView('verify');
+      if (hash.startsWith('#admin') || path.startsWith('/admin')) {
+        setIsAdminView(true);
       } else {
-        setCurrentView('home');
+        setIsAdminView(false);
       }
     };
 
@@ -56,89 +57,98 @@ export default function App() {
     return () => window.removeEventListener('popstate', handleLocationChange);
   }, []);
 
-  // Fetch real-time seat inventory
-  const refreshInventory = async () => {
+  // Sync real-time inventory and dynamic program configuration
+  const refreshAllData = async () => {
     try {
-      const stats = await api.getInventoryStats();
+      const [stats, config] = await Promise.all([
+        api.getInventoryStats(),
+        api.getProgramConfig()
+      ]);
       setInventory(stats);
+      setProgramConfig(config);
     } catch {
-      // Fallback
+      // Safe fallback
     }
   };
 
   useEffect(() => {
-    refreshInventory();
+    refreshAllData();
   }, []);
 
-  const handleNavigate = (view: 'home' | 'admin' | 'verify') => {
-    setCurrentView(view);
-    if (view === 'admin') {
-      window.history.pushState(null, '', '#admin');
-    } else if (view === 'verify') {
-      window.history.pushState(null, '', '#verify');
-    } else {
-      window.history.pushState(null, '', '/');
-    }
+  const openAdmin = () => {
+    setIsAdminView(true);
+    window.history.pushState(null, '', '#admin');
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  return (
-    <div className="min-h-screen bg-[#0B0C0E] text-slate-100 flex flex-col font-sans selection:bg-[#E05E2B]/20 selection:text-white">
-      {/* Dynamic Header */}
-      {currentView !== 'admin' && (
-        <Header
-          currentView={currentView}
-          onNavigate={handleNavigate}
-          onOpenRegister={() => setIsOnboardingOpen(true)}
-          availableSeats={inventory.availableSeats}
-        />
-      )}
+  const closeAdmin = () => {
+    setIsAdminView(false);
+    window.history.pushState(null, '', '/');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
 
-      {/* Main View Router */}
-      <main className="flex-1">
-        {currentView === 'home' && (
-          <>
-            <HeroSection
+  // Called when Admin edits the formation or loads a preset
+  const handleProgramConfigUpdated = (newConfig: ProgramConfig) => {
+    setProgramConfig(newConfig);
+    refreshAllData();
+  };
+
+  return (
+    <div className="min-h-screen bg-white dark:bg-[#000000] text-slate-900 dark:text-slate-100 flex flex-col font-inter selection:bg-[#E50914]/30 selection:text-white transition-colors duration-200">
+      {isAdminView ? (
+        // Dedicated Isolated Admin Portal (with CMS Formation Editor tab)
+        <AdminPortal 
+          onBackToClient={closeAdmin} 
+          currentConfig={programConfig}
+          onConfigUpdated={handleProgramConfigUpdated}
+        />
+      ) : (
+        // Public Dynamic Client Application
+        <>
+          <ClientHeader
+            programConfig={programConfig}
+            onOpenRegister={() => setIsOnboardingOpen(true)}
+            onOpenAdmin={openAdmin}
+          />
+
+          <main className="flex-1">
+            <ClientHero
+              programConfig={programConfig}
               inventory={inventory}
               onOpenRegister={() => setIsOnboardingOpen(true)}
-              onNavigateVerify={() => handleNavigate('verify')}
+              onOpenAdmin={openAdmin}
             />
-            <CurriculumOverview
+
+            <ClientCurriculum
+              programConfig={programConfig}
               onOpenRegister={() => setIsOnboardingOpen(true)}
             />
-          </>
-        )}
+          </main>
 
-        {currentView === 'admin' && (
-          <AdminDashboard
-            onBackToSite={() => handleNavigate('home')}
+          <ClientOnboardingModal
+            programConfig={programConfig}
+            isOpen={isOnboardingOpen}
+            onClose={() => setIsOnboardingOpen(false)}
+            onSuccess={() => {
+              refreshAllData();
+            }}
           />
-        )}
 
-        {currentView === 'verify' && (
-          <TicketVerificationView
-            initialToken={urlToken}
-            onBack={() => handleNavigate('home')}
+          <ClientFooter
+            programConfig={programConfig}
+            onOpenAdmin={openAdmin}
+            onOpenRegister={() => setIsOnboardingOpen(true)}
           />
-        )}
-      </main>
-
-      {/* 3-Step Onboarding Modal */}
-      <OnboardingFlow
-        isOpen={isOnboardingOpen}
-        onClose={() => setIsOnboardingOpen(false)}
-        onSuccess={() => {
-          refreshInventory();
-        }}
-      />
-
-      {/* Footer */}
-      {currentView !== 'admin' && (
-        <Footer
-          onNavigate={handleNavigate}
-          onOpenRegister={() => setIsOnboardingOpen(true)}
-        />
+        </>
       )}
     </div>
+  );
+}
+
+export default function App() {
+  return (
+    <ThemeProvider>
+      <AppContent />
+    </ThemeProvider>
   );
 }
