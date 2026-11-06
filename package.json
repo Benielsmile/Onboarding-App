@@ -14,7 +14,8 @@
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
     "db:check": "tsx scripts/check-neon.ts",
-    "db:migrate": "tsx scripts/run-neon-migrations.ts"
+    "db:migrate": "tsx scripts/run-neon-migrations.ts",
+    "db:tickets": "tsx scripts/check-tickets.ts"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",

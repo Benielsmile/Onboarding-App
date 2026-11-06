@@ -39,10 +39,18 @@ const MASTER_SECRET = getMasterSecret();
 const NEON_READY_KEY = '__piga_neon_ready__';
 
 // ============================================================================
-// ADMIN IDENTITY (Owner-only gate — time-safe credential vault)
+// ADMIN IDENTITY (Owner-only gate — env-driven, zero secrets in source)
+// Both variables are REQUIRED at boot; declared locally in .env and on Vercel.
 // ============================================================================
-const ADMIN_EMAIL = (process.env.ADMIN_EMAIL || 'Benielsmile89@gmail.com').trim().toLowerCase();
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'Beniel smile 00';
+const ADMIN_EMAIL = (process.env.ADMIN_EMAIL || '').trim().toLowerCase();
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || '';
+
+if (!ADMIN_EMAIL || !ADMIN_PASSWORD) {
+  console.error(
+    '[BOOT CONFIG ERROR] ADMIN_EMAIL et ADMIN_PASSWORD doivent être déclarés dans les variables ' +
+    'd\'environnement (.env local / Vercel Project Settings). Le serveur ne démarrera pas sans identité Direction.'
+  );
+}
 
 function verifyAdminCredentials(email: string, password: string): boolean {
   if (!email || !password) return false;

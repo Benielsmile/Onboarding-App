@@ -312,12 +312,20 @@ async function seedDemoParticipants(): Promise<void> {
 }
 
 // ============================================================================
-// CHIFFREMENT AES-256-GCM (mutualisé avec server.ts)
+// CHIFFREMENT AES-256-GCM (mutualisé avec src/server/app.ts)
+// ARSENAL_SECRET est obligatoire : les billets déjà émis dans Neon utilisent
+// la clé de l'environnement ; déclarer LA MÊME valeur sur Vercel pour conserver
+// la validité des QR codes existants.
 // ============================================================================
-const MASTER_SECRET_FALLBACK = 'ARSENAL_AGENTIQUE_2026_MASTER_SECRET_KEY_GCM_SECURE_AUTH';
-
 export function getMasterSecret(): string {
-  return process.env.ARSENAL_SECRET || MASTER_SECRET_FALLBACK;
+  const secret = process.env.ARSENAL_SECRET;
+  if (!secret) {
+    throw new Error(
+      'ARSENAL_SECRET manquant : déclarez la variable d\'environnement (.env local / Vercel). ' +
+      'Aucun fallback cryptographique toléré en production.'
+    );
+  }
+  return secret;
 }
 
 export function encryptAES256GCM(payload: TicketPayload): string {
