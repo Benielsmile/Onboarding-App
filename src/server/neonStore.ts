@@ -193,6 +193,21 @@ export async function initNeon(): Promise<void> {
     }
   }
 
+  // Migration de conformité : le compte Orange Money récepteur est au nom d'une
+  // personne physique (Beniel Musuela, Chargé d'Administration PIGA STUDIO),
+  // pas au nom de l'entité. Corrige l'ancienne valeur 'PIGA STUDIO' ou les
+  // valeurs manquantes, une seule fois (idempotent). Une autre valeur choisie
+  // volontairement dans la console admin n'est jamais écrasée.
+  await p.query(
+    `UPDATE public.formations
+     SET config = jsonb_set(config, '{orangeMoneyHolder}', to_jsonb('Beniel Musuela'::text))
+     WHERE NOT EXISTS (
+       SELECT 1
+       FROM jsonb_object_keys(config) AS k
+       WHERE k = 'orangeMoneyHolder'
+     ) OR config->>'orangeMoneyHolder' = 'PIGA STUDIO'`
+  ).catch((err) => console.error('[NEON INIT] Migration titulaire Orange Money:', err));
+
   // Migration douce : images d'historique sur disque -> stored_files (multi-instance)
   await migrateLegacyUploads();
 

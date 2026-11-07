@@ -24,6 +24,14 @@ export const PIGA_DIRECTION_WHATSAPP_NUMBER = '+243997406281';
 export const PIGA_DIRECTION_WHATSAPP_URL = 'https://wa.me/243997406281';
 export const PIGA_ORANGE_MONEY_NUMBER = '+243803240289';
 export const PIGA_ORANGE_MONEY_DISPLAY = '+243 803 240 289';
+/**
+ * Titulaire RÉEL du compte Orange Money récepteur : personne physique
+ * (Chargé d'Administration de PIGA STUDIO). L'entité PIGA STUDIO reste
+ * l'opérateur de la plateforme — le compte encaisseur, lui, est au nom de
+ * la personne physique ci-dessous.
+ */
+export const PIGA_ORANGE_MONEY_HOLDER = 'Beniel Musuela';
+export const PIGA_ORANGE_MONEY_HOLDER_ROLE = "Personne physique · Chargé d'Administration PIGA STUDIO";
 
 /** Construit une URL wa.me à partir du téléphone Direction (local 09... ou +243 9...) */
 export function directionWhatsAppLink(directionPhoneOrNumber?: string): string {
@@ -63,7 +71,7 @@ export function resolveMessageInfo(info?: FormationMessageInfo) {
     timeDisplay: info?.timeDisplay?.trim() || '09h00 - 18h00 (Heure de Kinshasa)',
     locationDisplay: info?.locationDisplay?.trim() || 'Kinshasa',
     orangeMoneyNumber: info?.orangeMoneyNumber?.trim() || PIGA_ORANGE_MONEY_DISPLAY,
-    orangeMoneyHolder: info?.orangeMoneyHolder?.trim() || 'PIGA STUDIO',
+    orangeMoneyHolder: info?.orangeMoneyHolder?.trim() || PIGA_ORANGE_MONEY_HOLDER,
     directionEmail: info?.directionEmail?.trim() || PIGA_DIRECTION_EMAIL,
     directionPhone: info?.directionPhone?.trim() || PIGA_DIRECTION_PHONE_LOCAL,
     directionWhatsAppUrl: directionWhatsAppLink(info?.directionPhone) || PIGA_DIRECTION_WHATSAPP_URL,
@@ -145,7 +153,7 @@ export function generateWhatsAppRevocationUrl(
     `🔖 *Réf. Transaction saisie :* \`${participant.transactionReference}\``,
     `❌ *Motif relevé :* ${reason}`,
     ``,
-    `Pour régulariser votre réservation ou soumettre une capture lisible du transfert Orange Money vers le numéro officiel *${msg.orangeMoneyNumber}*, veuillez répondre directement à ce message ou contacter la direction :`,
+    `Pour régulariser votre réservation ou soumettre une capture lisible du transfert Orange Money vers le numéro officiel *${msg.orangeMoneyNumber}* (compte : *${msg.orangeMoneyHolder}*), veuillez répondre directement à ce message ou contacter la direction :`,
     ``,
     `📧 Email Direction : ${msg.directionEmail}`,
     `📞 Téléphone Direction : ${msg.directionPhone}`,

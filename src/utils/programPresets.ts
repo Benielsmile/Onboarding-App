@@ -37,7 +37,7 @@ export const DEFAULT_PROGRAM_CONFIG: ProgramConfig = {
   totalCapacity: 80,
   status: 'OPEN',
   orangeMoneyNumber: '+243 803 240 289',
-  orangeMoneyHolder: 'PIGA STUDIO',
+  orangeMoneyHolder: 'Beniel Musuela',
   directionEmail: 'Benielsmile89@gmail.com',
   directionPhone: '0997406281',
   heroImageUrl: '/src/assets/images/hero_arsenal_agentique_1793949804735.jpg',

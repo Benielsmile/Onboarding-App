@@ -20,6 +20,7 @@ import { api } from '../services/api.ts';
 import { triggerNativePushNotification } from '../utils/pwaNotifications.ts';
 import {
   PIGA_ORANGE_MONEY_DISPLAY,
+  PIGA_ORANGE_MONEY_HOLDER,
   PIGA_DIRECTION_EMAIL,
   PIGA_DIRECTION_PHONE_LOCAL,
   directionWhatsAppLink,
@@ -76,7 +77,7 @@ export const ClientOnboardingModal: React.FC<ClientOnboardingModalProps> = ({
   // Dynamic values from program configuration
   const ticketPrice = programConfig?.ticketPriceUsd !== undefined ? programConfig.ticketPriceUsd : 20.00;
   const orangeNumber = programConfig?.orangeMoneyNumber || PIGA_ORANGE_MONEY_DISPLAY;
-  const orangeHolder = programConfig?.orangeMoneyHolder || 'PIGA STUDIO';
+  const orangeHolder = programConfig?.orangeMoneyHolder || PIGA_ORANGE_MONEY_HOLDER;
   const directionEmail = programConfig?.directionEmail || PIGA_DIRECTION_EMAIL;
   const directionPhone = programConfig?.directionPhone || PIGA_DIRECTION_PHONE_LOCAL;
   // Canal WhatsApp officiel : toujours le numéro Direction (0997406281).
@@ -530,7 +531,7 @@ export const ClientOnboardingModal: React.FC<ClientOnboardingModalProps> = ({
                 </div>
 
                 <div className="text-[11px] text-slate-600 dark:text-slate-400 flex flex-col gap-0.5 pt-1">
-                  <div>Titulaire : <strong>{orangeHolder}</strong></div>
+                  <div>Titulaire : <strong>{orangeHolder}</strong> · Personne physique, Chargé d'Administration PIGA STUDIO</div>
                   <div>Contact Direction : {directionEmail} · {directionPhone}</div>
                   <a
                     href={directionWhatsAppUrl}

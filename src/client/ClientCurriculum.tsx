@@ -154,7 +154,7 @@ export const ClientCurriculum: React.FC<ClientCurriculumProps> = ({
                   </li>
                   <li className="flex items-start gap-3.5">
                     <CheckCircle2 className="w-4.5 h-4.5 text-[#E50914] shrink-0 mt-0.5" />
-                    <span><strong className="text-slate-900 dark:text-white">Paiement Unique Orange Money :</strong> Compte officiel <strong className="text-[#E50914] font-mono">{programConfig.orangeMoneyNumber}</strong> (Titulaire : {programConfig.orangeMoneyHolder}).</span>
+                    <span><strong className="text-slate-900 dark:text-white">Paiement Unique Orange Money :</strong> Compte officiel <strong className="text-[#E50914] font-mono">{programConfig.orangeMoneyNumber}</strong> (Titulaire : {programConfig.orangeMoneyHolder} — personne physique, Chargé d'Administration PIGA STUDIO).</span>
                   </li>
                   <li className="flex items-start gap-3.5">
                     <CheckCircle2 className="w-4.5 h-4.5 text-[#E50914] shrink-0 mt-0.5" />

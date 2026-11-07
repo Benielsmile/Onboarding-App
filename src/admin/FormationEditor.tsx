@@ -446,9 +446,26 @@ export const FormationEditor: React.FC<FormationEditorProps> = ({ config, onSave
           <div className="text-xs font-bold font-montserrat text-slate-900 dark:text-white uppercase tracking-wider">
             Compte Orange Money Récepteur & Contacts Direction
           </div>
+
+          {/* Bande de vérification — GROS CARACTÈRES (lisibilité console) */}
+          <div className="rounded-lg border-2 border-[#E50914]/40 bg-[#E50914]/5 px-5 py-4 space-y-2">
+            <div className="text-[11px] font-bold font-montserrat uppercase tracking-wider text-[#E50914]">
+              ✅ Vérification visuelle — ce que les clients verront
+            </div>
+            <div className="text-2xl font-mono font-bold text-slate-900 dark:text-white leading-snug break-all">
+              Orange Money : {draft.orangeMoneyNumber || '—'}
+            </div>
+            <div className="text-xl font-bold text-slate-700 dark:text-slate-200 leading-snug break-all">
+              Titulaire : {draft.orangeMoneyHolder || '—'}
+              <span className="block text-sm font-semibold text-slate-500 dark:text-slate-400">
+                (Personne physique · Chargé d'Administration PIGA STUDIO)
+              </span>
+            </div>
+          </div>
+
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             {field('Numéro Orange Money (affichage)', 'orangeMoneyNumber', '+243 803 240 289')}
-            {field('Titulaire du compte', 'orangeMoneyHolder', 'PIGA STUDIO')}
+            {field('Titulaire du compte', 'orangeMoneyHolder', 'Beniel Musuela')}
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             {field('Email Direction', 'directionEmail', 'direction@piga.cd')}
