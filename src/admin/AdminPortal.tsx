@@ -42,7 +42,7 @@ import {
   Trash2,
   Copy
 } from 'lucide-react';
-import { Html5Qrcode } from 'html5-qrcode';
+import { Html5Qrcode, Html5QrcodeSupportedFormats } from 'html5-qrcode';
 import { PigaLogo } from '../components/PigaLogo.tsx';
 import { ThemeToggle } from '../components/ThemeToggle.tsx';
 import { FormationEditor } from './FormationEditor.tsx';
@@ -120,6 +120,9 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToClient, curren
   const [isVerifyingToken, setIsVerifyingToken] = useState(false);
   const [isCameraScannerActive, setIsCameraScannerActive] = useState(false);
   const scannerRef = useRef<Html5Qrcode | null>(null);
+  // Live scanner diagnostics (the user has weak eyesight — large readable feedback)
+  const [scannerFrameCount, setScannerFrameCount] = useState(0);
+  const [scannerLastError, setScannerLastError] = useState<string | null>(null);
 
   // PWA & Notification Status
   const { isInstallable, install } = usePWAInstall();
@@ -285,6 +288,11 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToClient, curren
       // 1. URL complète collée (PDF QR, lien de vérification) → extraire le jeton
       const urlToken = input.match(/[#?&]token=([^&\s]+)/i);
       let candidate = urlToken ? decodeURIComponent(urlToken[1]) : input;
+      // Variante QR sans jeton: "...?ticket=CODE" → transformer en code billet
+      if (!urlToken) {
+        const urlTicket = input.match(/[?&]ticket=([^&\s]+)/i);
+        if (urlTicket) candidate = decodeURIComponent(urlTicket[1]);
+      }
 
       const isHexToken = /^[0-9a-f]+\.[0-9a-f]+\.[0-9a-f]+$/i.test(candidate) && candidate.length > 100;
       if (!isHexToken) {
@@ -427,11 +435,25 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToClient, curren
       void (async () => {
         // 1. Toute ancienne instance est stoppée AVANT montage (caméra libre)
         await stopCameraScanner();
+        setScannerFrameCount(0);
+        setScannerLastError(null);
 
         const mount = document.getElementById('qr-reader-container');
         if (!mount) return;
 
-        const SCANNER_CFG = { fps: 10, qrbox: { width: 240, height: 240 } as { width: number; height: number } } as const;
+        // Cadence + fenêtre de scan responsive (80% du plus petit côté) +
+        // accélération native BarcodeDetector (Android/Chrome) + formats QR uniquement
+        const SCANNER_CFG = {
+          fps: 15,
+          qrbox: (vw: number, vh: number) => {
+            const side = Math.max(140, Math.floor(Math.min(vw, vh) * 0.8));
+            return { width: side, height: side };
+          },
+          formatsToSupport: [Html5QrcodeSupportedFormats.QR_CODE],
+          experimentalFeatures: { useBarCodeDetectorIfSupported: true },
+          showTorchButtonIfSupported: true
+        };
+
         const onScanSuccess = (decodedText: string): void => {
           setScannerTokenInput(decodedText);
           verifyTokenString(decodedText);
@@ -440,19 +462,32 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToClient, curren
             setIsCameraScannerActive(false);
           })();
         };
-        const onScanFailure = (): void => { /* frame sans QR — ignorer */ };
-        // 2. Injection du callback dans le scanner créé ci-dessous
+        let failureTick = 0;
+        const onScanFailure = (_img: unknown, err: unknown): void => {
+          failureTick += 1;
+          if (failureTick % 30 === 1) {
+            // Feedback visuel live : la boucle tourne bien
+            setScannerFrameCount(failureTick);
+          }
+          const msg = typeof err === 'string' ? err : err instanceof Error ? err.message : '';
+          if (msg && !msg.includes('NotFound')) setScannerLastError(msg);
+        };
+
         const createAndStart = async (cameraIdOrConfig: string | { facingMode: string }): Promise<boolean> => {
           try {
-            const cam = new Html5Qrcode('qr-reader-container');
+            const cam = new Html5Qrcode('qr-reader-container', {
+              formatsToSupport: [Html5QrcodeSupportedFormats.QR_CODE],
+              verbose: false
+            });
             scannerRef.current = cam;
             await cam.start(cameraIdOrConfig as never, SCANNER_CFG as never, onScanSuccess, onScanFailure);
             return true;
-          } catch {
-            // Nettoyage l'instance morte pour libérer la caméra
+          } catch (e) {
+            // Nettoyage de l'instance morte pour libérer la caméra
             const cam2 = scannerRef.current;
             scannerRef.current = null;
             if (cam2) { try { cam2.clear(); } catch { /* purge DOM */ } }
+            setScannerLastError(e instanceof Error ? e.message : String(e));
             return false;
           }
         };
@@ -1244,10 +1279,21 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToClient, curren
               {isCameraScannerActive && (
                 <div className="p-4 rounded-lg bg-black border border-slate-300 dark:border-[#2A2A2A] max-w-md mx-auto text-center">
                   <div id="qr-reader-container" className="w-full min-h-[280px] aspect-video overflow-hidden rounded bg-black" />
+                  {/* Diagnostics live — la boucle tourne-t-elle ? */}
+                  <div className="mt-2 rounded-md border-2 border-[#10B981]/50 bg-[#10B981]/10 px-3 py-2">
+                    <div className="text-sm font-bold font-mono text-[#10B981]">
+                      🔍 Recherche active… {scannerFrameCount} image(s) analysée(s)
+                    </div>
+                    {scannerLastError && (
+                      <div className="text-[11px] font-semibold text-amber-300 mt-1 break-all">
+                        {scannerLastError}
+                      </div>
+                    )}
+                  </div>
                   <div className="text-xs font-semibold text-slate-200 mt-2">
                     Pointez l'objectif vers le QR Code officiel PIGA STUDIO
                     <span className="block text-[10px] text-slate-400 font-normal mt-0.5">
-                      Si l'écran reste noir : accordez l'autorisation caméra au navigateur, ou cliquez « Fermer Caméra » puis réactivez.
+                      15 à 30 cm de distance · bien éclairé · impossible de scanner le QR affiché sur ce même téléphone (ouvrez le billet sur un autre appareil ou imprimez-le)
                     </span>
                   </div>
                 </div>
