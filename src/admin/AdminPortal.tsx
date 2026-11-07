@@ -42,7 +42,8 @@ import {
   Printer,
   Trash2,
   Copy,
-  ChevronDown
+  ChevronDown,
+  Menu
 } from 'lucide-react';
 // — Aucun import html5-qrcode : moteur natif BarcodeDetector + flux caméra pilotés ici —
 import { PigaLogo } from '../components/PigaLogo.tsx';
@@ -87,6 +88,8 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToClient, curren
   const [currentTab, setCurrentTab] = useState<'formation' | 'dashboard' | 'participants' | 'scanner' | 'audit'>('formation');
   // Mobile navbar: collapsible / expandable (dernière pièce UX mobile)
   const [isMobileNavOpen, setIsMobileNavOpen] = useState(false);
+  // Mobile header: panneau déplié du hamburger (écrans très petits)
+  const [isHeaderMenuOpen, setIsHeaderMenuOpen] = useState(false);
 
   // Core Data
   const [participants, setParticipants] = useState<Participant[]>([]);
@@ -706,87 +709,145 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToClient, curren
   // AUTHENTICATED ADMIN PORTAL
   // --------------------------------------------------------------------------
   return (
-    <div className="min-h-screen bg-white dark:bg-[#000000] text-slate-900 dark:text-slate-100 flex flex-col font-inter transition-colors duration-200">
-      {/* Top Bar */}
-      <header className="border-b border-slate-200 dark:border-[#1E1E1E] bg-slate-50 dark:bg-[#0A0A0A] px-6 py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 sticky top-0 z-30 transition-colors">
-        <div className="flex items-center gap-4">
-          <PigaLogo variant="compact" size="sm" />
-          <div className="border-l border-slate-200 dark:border-[#222222] pl-4">
-            <h1 className="text-sm font-bold font-montserrat text-slate-900 dark:text-white flex items-center gap-2 flex-wrap">
-              <span>{resolvedInfo.decorativeName} · Supervision PIGA</span>
-              <span className="text-[10px] font-mono text-[#E50914] bg-[#E50914]/10 dark:bg-[#E50914]/15 px-2 py-0.5 rounded font-bold border border-[#E50914]/30">
-                ORANGE MONEY ({resolvedInfo.orangeMoneyNumber})
-              </span>
-              <span className="text-xs font-mono text-[#10B981] bg-[#10B981]/10 px-2.5 py-1 rounded font-bold border-2 border-[#10B981]/40">
-                WhatsApp {WHATSAPP_TEMPLATE_VERSION} — PDF+QR ✅
-              </span>
-            </h1>
-            <div className="text-[11px] text-slate-500 dark:text-slate-400 flex items-center gap-2 mt-0.5">
-              <span>Auditeur Chef : ADM-2026-CHIEF</span>
-              <span>·</span>
-              <span className="text-[#10B981] font-medium">Sécurité Zéro-Trust Active</span>
+    <div className="min-h-screen bg-white dark:bg-[#000000] text-slate-900 dark:text-slate-100 flex flex-col font-inter transition-colors duration-200 overflow-x-hidden">
+      {/* Top Bar — compact + hamburger (mobile), complet (desktop) */}
+      <header className="border-b border-slate-200 dark:border-[#1E1E1E] bg-slate-50 dark:bg-[#0A0A0A] px-3 sm:px-6 py-2.5 sm:py-4 sticky top-0 z-30 transition-colors">
+        {/* ROW 1 — état compact permanent (tous écrans) */}
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2 min-w-0">
+            {/* Hamburger mobile — déplie le panneau */}
+            <button
+              onClick={() => setIsHeaderMenuOpen(v => !v)}
+              aria-expanded={isHeaderMenuOpen}
+              aria-controls="admin-header-panel"
+              className="md:hidden p-2 rounded-md bg-[#E50914] text-white flex items-center cursor-pointer shrink-0"
+              title="Menu console"
+            >
+              {isHeaderMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+            </button>
+            <PigaLogo variant="compact" size="sm" />
+            <div className="hidden sm:block border-l border-slate-200 dark:border-[#222222] pl-4 min-w-0">
+              <h1 className="text-sm font-bold font-montserrat text-slate-900 dark:text-white flex items-center gap-2 flex-wrap">
+                <span className="truncate">{resolvedInfo.decorativeName} · Supervision PIGA</span>
+                <span className="text-[10px] font-mono text-[#E50914] bg-[#E50914]/10 dark:bg-[#E50914]/15 px-2 py-0.5 rounded font-bold border border-[#E50914]/30 shrink-0">
+                  ORANGE MONEY ({resolvedInfo.orangeMoneyNumber})
+                </span>
+                <span className="text-xs font-mono text-[#10B981] bg-[#10B981]/10 px-2.5 py-1 rounded font-bold border-2 border-[#10B981]/40 shrink-0">
+                  WhatsApp {WHATSAPP_TEMPLATE_VERSION} — PDF+QR ✅
+                </span>
+              </h1>
+              <div className="text-[11px] text-slate-500 dark:text-slate-400 flex items-center gap-2 mt-0.5">
+                <span>Auditeur Chef : ADM-2026-CHIEF</span>
+                <span>·</span>
+                <span className="text-[#10B981] font-medium">Sécurité Zéro-Trust Active</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Actions compacts permanentes : thème · refresh · verrou */}
+          <div className="flex items-center gap-1.5 sm:gap-2.5 shrink-0">
+            <ThemeToggle showLogoToggle={true} size="sm" />
+            <button
+              onClick={loadData}
+              className="p-2 text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white rounded bg-slate-100 hover:bg-slate-200 dark:bg-[#141414] border border-slate-300 dark:border-[#262626] transition-colors cursor-pointer"
+              title="Actualiser les données"
+            >
+              <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
+            </button>
+            <button
+              onClick={() => setIsAuthenticated(false)}
+              className="p-2 text-slate-600 hover:text-red-500 dark:text-slate-400 dark:hover:text-red-400 rounded bg-slate-100 hover:bg-slate-200 dark:bg-[#141414] border border-slate-300 dark:border-[#262626] transition-colors cursor-pointer"
+              title="Verrouiller la session"
+            >
+              <LogOut className="w-4 h-4" />
+            </button>
+            {/* Actions étendues — uniquement desktop (mobile dans le panneau ☰) */}
+            <div className="hidden md:flex items-center gap-2.5">
+              <button
+                onClick={handleEnableNotifications}
+                className={`px-3 py-1.5 text-xs font-medium rounded-md border flex items-center gap-1.5 transition-colors cursor-pointer ${
+                  notificationPermission === 'granted'
+                    ? 'bg-[#10B981]/15 text-[#10B981] border-[#10B981]/30'
+                    : 'bg-slate-100 hover:bg-slate-200 dark:bg-[#141414] text-slate-700 dark:text-slate-300 dark:hover:text-white border-slate-300 dark:border-[#2A2A2A]'
+                }`}
+                title="Activer les notifications push système pour les nouvelles inscriptions"
+              >
+                <Bell className="w-3.5 h-3.5" />
+                <span>{notificationPermission === 'granted' ? 'Push Actif' : 'Activer Notifications'}</span>
+              </button>
+
+              {isInstallable && (
+                <button
+                  onClick={install}
+                  className="px-3 py-1.5 text-xs font-bold font-montserrat text-white bg-[#E50914] hover:bg-[#C80711] rounded-md transition-colors flex items-center gap-1.5 cursor-pointer shadow-xs"
+                  title="Installer la console PIGA STUDIO comme application autonome"
+                >
+                  <Smartphone className="w-3.5 h-3.5" />
+                  <span>Installer PWA</span>
+                </button>
+              )}
+
+              <button
+                onClick={onBackToClient}
+                className="px-3 py-1.5 text-xs font-bold text-slate-800 dark:text-white bg-slate-200 hover:bg-slate-300 dark:bg-[#1E1E1E] dark:hover:bg-[#282828] border border-slate-300 dark:border-[#333333] rounded-md transition-colors cursor-pointer"
+              >
+                Page Publique
+              </button>
             </div>
           </div>
         </div>
 
-        {/* Top Bar Actions */}
-        <div className="flex items-center gap-2.5 flex-wrap">
-          {/* Dual Theme Switcher */}
-          <ThemeToggle showLogoToggle={true} size="sm" />
-
-          {/* Web Push Notification Status Button */}
-          <button
-            onClick={handleEnableNotifications}
-            className={`px-3 py-1.5 text-xs font-medium rounded-md border flex items-center gap-1.5 transition-colors cursor-pointer ${
-              notificationPermission === 'granted'
-                ? 'bg-[#10B981]/15 text-[#10B981] border-[#10B981]/30'
-                : 'bg-slate-100 hover:bg-slate-200 dark:bg-[#141414] text-slate-700 dark:text-slate-300 dark:hover:text-white border-slate-300 dark:border-[#2A2A2A]'
-            }`}
-            title="Activer les notifications push système pour les nouvelles inscriptions"
-          >
-            <Bell className="w-3.5 h-3.5" />
-            <span>{notificationPermission === 'granted' ? 'Push Actif' : 'Activer Notifications'}</span>
-          </button>
-
-          {/* PWA Install Button */}
-          {isInstallable && (
-            <button
-              onClick={install}
-              className="px-3 py-1.5 text-xs font-bold font-montserrat text-white bg-[#E50914] hover:bg-[#C80711] rounded-md transition-colors flex items-center gap-1.5 cursor-pointer shadow-xs"
-              title="Installer la console PIGA STUDIO comme application autonome"
-            >
-              <Smartphone className="w-3.5 h-3.5" />
-              <span>Installer PWA</span>
-            </button>
-          )}
-
-          <button
-            onClick={loadData}
-            className="p-2 text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white rounded bg-slate-100 hover:bg-slate-200 dark:bg-[#141414] border border-slate-300 dark:border-[#262626] transition-colors cursor-pointer"
-            title="Actualiser les données"
-          >
-            <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
-          </button>
-
-          <button
-            onClick={() => setIsAuthenticated(false)}
-            className="p-2 text-slate-600 hover:text-red-500 dark:text-slate-400 dark:hover:text-red-400 rounded bg-slate-100 hover:bg-slate-200 dark:bg-[#141414] border border-slate-300 dark:border-[#262626] transition-colors cursor-pointer"
-            title="Verrouiller la session"
-          >
-            <LogOut className="w-4 h-4" />
-          </button>
-
-          <button
-            onClick={onBackToClient}
-            className="px-3 py-1.5 text-xs font-bold text-slate-800 dark:text-white bg-slate-200 hover:bg-slate-300 dark:bg-[#1E1E1E] dark:hover:bg-[#282828] border border-slate-300 dark:border-[#333333] rounded-md transition-colors cursor-pointer"
-          >
-            Page Publique
-          </button>
-        </div>
+        {/* ROW 2 — panneau déplié du hamburger (mobile uniquement) */}
+        {isHeaderMenuOpen && (
+          <div id="admin-header-panel" className="md:hidden mt-2.5 rounded-lg bg-white dark:bg-[#0A0A0A] border border-slate-200 dark:border-[#1E1E1E] p-4 space-y-3 shadow-md animate-fade-in">
+            <div className="text-sm font-bold font-montserrat text-slate-900 dark:text-white break-words">
+              {resolvedInfo.decorativeName} · Supervision PIGA
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <span className="text-[10px] font-mono text-[#E50914] bg-[#E50914]/10 dark:bg-[#E50914]/15 px-2 py-1 rounded font-bold border border-[#E50914]/30 break-all">
+                ORANGE MONEY ({resolvedInfo.orangeMoneyNumber})
+              </span>
+              <span className="text-[10px] font-mono text-[#10B981] bg-[#10B981]/10 px-2 py-1 rounded font-bold border-2 border-[#10B981]/40 break-all">
+                WhatsApp {WHATSAPP_TEMPLATE_VERSION} — PDF+QR ✅
+              </span>
+            </div>
+            <div className="text-[11px] text-slate-500 dark:text-slate-400">
+              Auditeur Chef : ADM-2026-CHIEF · <span className="text-[#10B981] font-medium">Sécurité Zéro-Trust Active</span>
+            </div>
+            <div className="grid grid-cols-1 gap-2 pt-1">
+              <button
+                onClick={handleEnableNotifications}
+                className={`w-full justify-center px-3 py-3 text-sm font-medium rounded-md border flex items-center gap-2 transition-colors cursor-pointer ${
+                  notificationPermission === 'granted'
+                    ? 'bg-[#10B981]/15 text-[#10B981] border-[#10B981]/30'
+                    : 'bg-slate-100 dark:bg-[#141414] text-slate-700 dark:text-slate-300 border-slate-300 dark:border-[#2A2A2A]'
+                }`}
+              >
+                <Bell className="w-4 h-4" />
+                <span>{notificationPermission === 'granted' ? 'Push Actif' : 'Activer Notifications'}</span>
+              </button>
+              {isInstallable && (
+                <button
+                  onClick={install}
+                  className="w-full justify-center px-3 py-3 text-sm font-bold font-montserrat text-white bg-[#E50914] hover:bg-[#C80711] rounded-md transition-colors flex items-center gap-2 cursor-pointer shadow-xs"
+                >
+                  <Smartphone className="w-4 h-4" />
+                  <span>Installer PWA</span>
+                </button>
+              )}
+              <button
+                onClick={onBackToClient}
+                className="w-full justify-center px-3 py-3 text-sm font-bold text-slate-800 dark:text-white bg-slate-200 dark:bg-[#1E1E1E] border border-slate-300 dark:border-[#333333] rounded-md transition-colors cursor-pointer"
+              >
+                Page Publique
+              </button>
+            </div>
+          </div>
+        )}
       </header>
 
       {/* Main Layout Grid */}
-      <div className="flex-1 max-w-7xl w-full mx-auto p-6 space-y-6">
+      <div className="flex-1 max-w-7xl w-full mx-auto p-3 sm:p-6 space-y-6">
         {/* Success Banner */}
         {actionSuccessMessage && (
           <div className="p-3.5 rounded-md bg-[#10B981]/15 border border-[#10B981]/40 text-xs text-[#10B981] flex items-center justify-between animate-fade-in">
