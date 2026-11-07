@@ -76,8 +76,17 @@ function AppContent() {
   // Brand boot: hydrate config + inventory behind the PIGA splash loader
   useEffect(() => {
     let alive = true;
+
+    // Pont vers le splash statique index.html (pré-paint logo favicon)
+    const splashHost = window as unknown as { __pigaSplash?: { hide?: () => void } };
+    const syncSplashStatus = (status: string) => {
+      const el = document.getElementById('piga-splash-status');
+      if (el) el.textContent = status;
+    };
+
     const startedAt = Date.now();
     const boot = async () => {
+      syncSplashStatus('Synchronisation de la formation…');
       try {
         await refreshAllData();
       } catch {
@@ -86,7 +95,11 @@ function AppContent() {
       // Enforce a minimum splash so the brand reveal feels intentional
       const remaining = Math.max(0, 900 - (Date.now() - startedAt));
       await new Promise(resolve => setTimeout(resolve, remaining));
-      if (alive) setIsBooting(false);
+      if (alive) {
+        setIsBooting(false);
+        // La BrandLoader React prend le relais : dissolution du splash statique
+        splashHost.__pigaSplash?.hide?.();
+      }
     };
     boot();
     return () => { alive = false; };

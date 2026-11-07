@@ -56,6 +56,10 @@ function New-Icon {
 }
 
 try {
+    #findOrFail Copie du symbole pour le splash statique index.html (first paint)
+    Copy-Item $source (Join-Path $outDir 'logo-symbol.png') -Force
+    Write-Output 'Genere: logo-symbol.png (splash pre-paint)'
+
     # Favicon navigateur (petit, plein cadre sur transparent)
     New-Icon -Size 32  -Scale 1.0 -Background 'transparent' -OutFile 'favicon-32x32.png'
     New-Icon -Size 96  -Scale 1.0 -Background 'transparent' -OutFile 'favicon-96x96.png'

@@ -23,12 +23,107 @@
     <link rel="icon" type="image/png" sizes="96x96" href="/favicon-96x96.png" />
     <link rel="icon" type="image/png" sizes="192x192" href="/pwa-192x192.png" />
 
+    <!-- Préchauffage du symbole du logo pour le splash statique (first paint instantané) -->
+    <link rel="preload" as="image" href="/logo-symbol.png" type="image/png" />
+
+    <!-- ================================================================
+         SPLASH STATIQUE PIGA STUDIO (pre-paint, zéro JS requis pour démarrer)
+         Mêmes keyframes/durées que BrandLoader.tsx & src/index.css pour une
+         passation invisible vers le loader React pendant l'hydratation.
+         ================================================================ -->
+    <style>
+      #piga-splash {
+        position: fixed; inset: 0; z-index: 1000;
+        display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2rem;
+        background: #000000; color: #fff;
+      }
+      #piga-splash .ps-halo {
+        position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+        width: 560px; max-width: 90vw; height: 280px; border-radius: 9999px;
+        background: rgba(229, 9, 20, 0.14); filter: blur(48px); pointer-events: none;
+      }
+      #piga-splash .ps-logo {
+        position: relative; width: 110px; height: auto;
+        filter: drop-shadow(0 0 18px rgba(229, 9, 20, .35));
+      }
+      #piga-splash .ps-rail {
+        position: relative; width: 13rem; height: 3px; border-radius: 9999px;
+        background: #151515; overflow: hidden;
+      }
+      #piga-splash .ps-rail::before {
+        content: ''; position: absolute; inset: 0; transform: translateX(-100%);
+        background: linear-gradient(90deg, transparent, #E50914, transparent);
+        animation: ps-rail 1.4s ease-in-out infinite;
+      }
+      #piga-splash .ps-caption {
+        font-family: 'Montserrat', system-ui, sans-serif; font-weight: 800;
+        font-size: 10px; letter-spacing: .35em; text-transform: uppercase;
+      }
+      #piga-splash .ps-status {
+        font-family: 'Inter', system-ui, sans-serif; font-size: 11px; color: #94a3b8;
+      }
+      #piga-splash.ps-rise .ps-logo, #piga-splash.ps-rise .ps-rail,
+      #piga-splash.ps-rise .ps-caption, #piga-splash.ps-rise .ps-status {
+        animation: ps-rise .9s cubic-bezier(.22, 1, .36, 1) both;
+      }
+      #piga-splash.ps-hiding { animation: ps-fade-out .55s ease forwards; }
+      @keyframes ps-rise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: translateY(0); } }
+      @keyframes ps-rail { 0% { transform: translateX(-100%); } 50% { transform: translateX(0); } 100% { transform: translateX(100%); } }
+      @keyframes ps-fade-out { to { opacity: 0; } }
+      @media (prefers-reduced-motion: reduce) {
+        #piga-splash.ps-rise * { animation: none; opacity: 1; }
+        #piga-splash .ps-rail::before { animation-duration: 2.8s; }
+        #piga-splash.ps-hiding { transition: opacity .3s ease; }
+      }
+      /* Sécurité : se déverrouille seul si le JS applicatif échoue */
+      #piga-splash { transition: opacity .4s ease; }
+    </style>
+    <script>
+      (function () {
+        var el = null;
+        function hide() {
+          if (!el) return;
+          el.classList.add('ps-hiding');
+          var done = false;
+          var finish = function () { if (!done) { done = true; el && el.remove(); el = null; } };
+          setTimeout(finish, 700);
+          if (el) el.addEventListener('animationend', finish, { once: true });
+          document.documentElement.setAttribute('data-piga-boot', 'ready');
+        }
+        window.addEventListener('DOMContentLoaded', function () {
+          el = document.getElementById('piga-splash');
+          if (el) el.classList.add('ps-rise');
+          if (!el) return;
+          // Filet de sécurité : jamais bloquant plus de 15 s (JS cassé, CSP, etc.)
+          setTimeout(hide, 15000);
+          window.__pigaSplash = { hide: hide, el: function () { return el; } };
+          document.dispatchEvent(new CustomEvent('pigasplash:shown'));
+        });
+        // API exposée : window.__pigaSplash.hide() — appelée par App.tsx au boot
+        window.__pigaSplash = {
+          hide: hide,
+          el: function () { return document.getElementById('piga-splash'); }
+        };
+      })();
+    </script>
+
     <!-- PIGA Official Typography: Montserrat, Poppins, Inter -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&family=Montserrat:wght@600;700;800;900&family=Poppins:wght@500;600;700&display=swap" rel="stylesheet">
   </head>
   <body class="bg-[#000000] text-slate-100 antialiased selection:bg-[#E50914]/30 selection:text-white min-h-screen">
+    <!-- Splash statique PIGA STUDIO : couvre la page à la première seconde (logo favicon,
+         halo rouge, rail shimmer), retiré par App.tsx dès la fin du boot React. -->
+    <div id="piga-splash" aria-hidden="true">
+      <span class="ps-halo"></span>
+      <img class="ps-logo" src="/logo-symbol.png" alt="" width="110" height="93" decoding="async" />
+      <span class="ps-rail"></span>
+      <div style="position: relative; text-align: center; line-height: 1.6;">
+        <div class="ps-caption">PIGA STUDIO</div>
+        <div class="ps-status" id="piga-splash-status">Chargement de la plateforme…</div>
+      </div>
+    </div>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
