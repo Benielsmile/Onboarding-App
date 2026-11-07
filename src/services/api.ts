@@ -211,6 +211,24 @@ export const api = {
   },
 
   /**
+   * Post-workshop cleanup: permanently removes every participant registration
+   * and Orange Money proof, restoring a clean billing console for the next
+   * session. The immutable audit log is preserved (it documents the wipe).
+   */
+  async resetWorkshopData(adminId = 'ADM-2026-CHIEF'): Promise<{ success: boolean; deletedParticipants: number; deletedProofs: number }> {
+    const res = await this._adminFetch('/api/admin/reset-workshop', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ adminId })
+    });
+    const data = await res.json();
+    if (!res.ok || !data.success) {
+      throw new Error(data.message || 'Échec du nettoyage de la console.');
+    }
+    return data;
+  },
+
+  /**
    * Verifies an AES-256-GCM token either through backend endpoint or client Web Crypto
    */
   async verifyToken(token: string): Promise<CryptographicTokenVerification> {

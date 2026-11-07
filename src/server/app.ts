@@ -443,6 +443,22 @@ export async function createPigaApp(options: CreateAppOptions = {}): Promise<Exp
     return res.json({ success: true });
   });
 
+  // 11b. Admin: Post-workshop reset — wipes every registration and Orange Money
+  // proof, restoring a clean billing console for the next session/workshop.
+  app.post('/api/admin/reset-workshop', async (req: Request, res: Response) => {
+    try {
+      const { adminId = 'ADM-2026-CHIEF' } = req.body || {};
+      const clientIp = safelyGetClientIp(req);
+      const userAgent = req.headers['user-agent'] || 'Unknown-Client';
+
+      const result = await store.wipeWorkshopData(String(adminId), clientIp, userAgent);
+      return res.json({ success: true, ...result });
+    } catch (err) {
+      console.error('[RESET WORKSHOP ERROR]:', err);
+      return res.status(500).json({ success: false, message: 'Échec du nettoyage de la console. Réessayez.' });
+    }
+  });
+
   // 12. Formation Registry: list every saved formation + active one
   app.get('/api/admin/formations', async (req: Request, res: Response) => {
     const registry = await store.listFormations();

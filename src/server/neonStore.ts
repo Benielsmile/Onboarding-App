@@ -196,9 +196,12 @@ export async function initNeon(): Promise<void> {
   // Migration douce : images d'historique sur disque -> stored_files (multi-instance)
   await migrateLegacyUploads();
 
-  // Seed de démonstration seulement si la base participants est vierge
+  // Seed de démonstration seulement si la base participants EST vierge
+  // ET que le journal d'audit est vide (un nettoyage post-atelier laisse
+  // une entrée RESET_WORKSHOP_DATA : jamais de re-seed après un wipe).
   const demoCount = await p.query<{ n: number }>('SELECT count(*)::int AS n FROM public.participants');
-  if (demoCount.rows[0].n === 0) {
+  const auditCount = await p.query<{ n: number }>('SELECT count(*)::int AS n FROM public.audit_logs');
+  if (demoCount.rows[0].n === 0 && auditCount.rows[0].n === 0) {
     console.log('[NEON INIT] Base participants vierge : seed de démonstration inséré.');
     await seedDemoParticipants();
   }
@@ -1005,5 +1008,44 @@ export class NeonStore {
       throw new Error('LAST_FORMATION_DELETE_BLOCKED: Impossible de supprimer la dernière formation du registre.');
     }
     await this.db.query('DELETE FROM public.formations WHERE id = $1', [id]);
+  }
+
+  // --------------------------------------------------------------------------
+  // Nettoyage post-atelier (wipe) : réinitialise la billetterie pour la
+  // prochaine session. Supprime toutes les inscriptions et preuves Orange
+  // Money ; le journal d'audit immuable est conservé et documente l'action.
+  // --------------------------------------------------------------------------
+  async wipeWorkshopData(adminId: string, clientIp: string, userAgent: string): Promise<{ deletedParticipants: number; deletedProofs: number }> {
+    const client = await this.db.connect();
+    try {
+      await client.query('BEGIN');
+      const proofRes = await client.query(`DELETE FROM public.stored_files WHERE path LIKE 'proofs/%'`);
+      const partRes = await client.query('DELETE FROM public.participants');
+      const deletedParticipants = partRes.rowCount ?? 0;
+      const deletedProofs = proofRes.rowCount ?? 0;
+      await client.query(
+        `INSERT INTO public.audit_logs (id, admin_id, action_type, timestamp, user_agent, ip_address, metadata)
+         VALUES ($1, $2, 'RESET_WORKSHOP_DATA', now(), $3, $4, $5::jsonb)`,
+        [
+          crypto.randomUUID(),
+          adminId,
+          userAgent,
+          clientIp,
+          JSON.stringify({
+            deletedParticipants,
+            deletedProofs,
+            note: 'Nettoyage post-atelier : billetterie réinitialisée pour la prochaine session'
+          })
+        ]
+      );
+      await client.query('COMMIT');
+      console.log(`[WIPE] Post-atelier : ${deletedParticipants} inscription(s) et ${deletedProofs} preuve(s) supprimées par ${adminId}.`);
+      return { deletedParticipants, deletedProofs };
+    } catch (err) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw err;
+    } finally {
+      client.release();
+    }
   }
 }

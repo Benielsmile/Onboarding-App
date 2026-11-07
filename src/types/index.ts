@@ -102,7 +102,7 @@ export interface ProgramConfig {
 export interface AuditLogEntry {
   id: string;
   adminId: string;
-  actionType: 'CONFIRM_PAYMENT' | 'REJECT_PAYMENT' | 'REVOKE_RESERVATION' | 'DOWNLOAD_TICKET' | 'VIEW_PROOF' | 'RESEND_WHATSAPP' | 'ADMIN_LOGIN' | 'UPDATE_PROGRAM_CONFIG';
+  actionType: 'CONFIRM_PAYMENT' | 'REJECT_PAYMENT' | 'REVOKE_RESERVATION' | 'DOWNLOAD_TICKET' | 'VIEW_PROOF' | 'RESEND_WHATSAPP' | 'ADMIN_LOGIN' | 'UPDATE_PROGRAM_CONFIG' | 'EXPORT_DASHBOARD_PDF' | 'RESET_WORKSHOP_DATA';
   participantId?: string;
   timestamp: string;
   userAgent: string;

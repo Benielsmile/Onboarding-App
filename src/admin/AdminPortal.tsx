@@ -37,7 +37,9 @@ import {
   Camera,
   Mail,
   SlidersHorizontal,
-  TrendingUp
+  TrendingUp,
+  Printer,
+  Trash2
 } from 'lucide-react';
 import { Html5QrcodeScanner } from 'html5-qrcode';
 import { PigaLogo } from '../components/PigaLogo.tsx';
@@ -46,6 +48,7 @@ import { FormationEditor } from './FormationEditor.tsx';
 import type { Participant, AuditLogEntry, InventoryStatus, CryptographicTokenVerification, ProgramConfig, AdminStats } from '../types/index.ts';
 import { api, sanitizeSafeText } from '../services/api.ts';
 import { downloadTicketPDF } from '../utils/pdfGenerator.ts';
+import { downloadDashboardReportPDF } from '../utils/dashboardPdfGenerator.ts';
 import { DEFAULT_PROGRAM_CONFIG } from '../utils/programPresets.ts';
 import { 
   generateWhatsAppConfirmationUrl, 
@@ -96,6 +99,11 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToClient, curren
   const [revocationReason, setRevocationReason] = useState('Preuve Orange Money non identifiable ou transfert non reçu.');
   const [processingId, setProcessingId] = useState<string | null>(null);
   const [actionSuccessMessage, setActionSuccessMessage] = useState<string | null>(null);
+
+  // Post-Workshop: PDF Report Export & Console Wipe (next session preparation)
+  const [isWipeModalOpen, setIsWipeModalOpen] = useState(false);
+  const [wipeConfirmText, setWipeConfirmText] = useState('');
+  const [isWiping, setIsWiping] = useState(false);
 
   // Scanner & GCM Verification State
   const [scannerTokenInput, setScannerTokenInput] = useState('');
@@ -274,6 +282,50 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToClient, curren
       });
     } finally {
       setIsVerifyingToken(false);
+    }
+  };
+
+  // 7. Print Full Dashboard Report (post-workshop PDF archive of every module)
+  const handlePrintDashboardPdf = () => {
+    try {
+      downloadDashboardReportPDF({
+        stats: adminStats,
+        participants,
+        info: formationInfo,
+        inventory
+      });
+      void api.logAdminAction('EXPORT_DASHBOARD_PDF', undefined, {
+        note: 'Rapport général PDF édité depuis le dashboard',
+        participantCount: participants.length
+      });
+    } catch (err: unknown) {
+      console.error('[DASHBOARD PDF ERROR]:', err);
+      alert(err instanceof Error ? err.message : 'Erreur lors de la génération du rapport PDF.');
+    }
+  };
+
+  // 8. Post-Workshop Console Wipe — reset the billing for the next session
+  const openWipeModal = () => {
+    setWipeConfirmText('');
+    setIsWipeModalOpen(true);
+  };
+
+  const handleExecuteWipe = async () => {
+    if (wipeConfirmText.trim().toUpperCase() !== 'NETTOYER') return;
+    setIsWiping(true);
+    try {
+      const result = await api.resetWorkshopData();
+      setIsWipeModalOpen(false);
+      setWipeConfirmText('');
+      await loadData();
+      setActionSuccessMessage(
+        `Console nettoyée : ${result.deletedParticipants} inscription(s) et ${result.deletedProofs} preuve(s) Orange Money supprimée(s). La billetterie est prête pour la prochaine session.`
+      );
+      setTimeout(() => setActionSuccessMessage(null), 8000);
+    } catch (err: unknown) {
+      alert(err instanceof Error ? err.message : 'Erreur lors du nettoyage de la console.');
+    } finally {
+      setIsWiping(false);
     }
   };
 
@@ -674,6 +726,38 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToClient, curren
         {/* ==================================================================== */}
         {/* TAB 2: SALES HISTORY & PER-FORMATION ANALYTICS */}
         {/* ==================================================================== */}
+        {currentTab === 'dashboard' && (
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 p-4 rounded-xl bg-[#F8F9FA] dark:bg-[#0A0A0A] border border-slate-200 dark:border-[#1E1E1E] animate-fade-in">
+            <div>
+              <div className="text-xs font-bold font-montserrat text-slate-900 dark:text-white uppercase tracking-wider">
+                Post-Atelier · Export &amp; Nettoyage
+              </div>
+              <div className="text-[11px] text-slate-500 mt-1">
+                Imprimez l'archive PDF complète de la console, puis réinitialisez la billetterie pour la prochaine formation.
+              </div>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                onClick={handlePrintDashboardPdf}
+                className="px-4 py-2.5 text-xs font-bold font-montserrat text-white bg-[#E50914] hover:bg-[#C80711] rounded-md transition-colors flex items-center gap-2 cursor-pointer shadow-xs"
+                title="Générer le rapport PDF complet : statistiques, historique des ventes et registre des participants"
+              >
+                <Printer className="w-4 h-4" />
+                <span>Imprimer le rapport PDF</span>
+              </button>
+
+              <button
+                onClick={openWipeModal}
+                className="px-4 py-2.5 text-xs font-bold font-montserrat text-red-600 dark:text-red-400 bg-white dark:bg-[#141414] hover:bg-red-50 dark:hover:bg-red-950/30 border border-red-300 dark:border-red-900/60 rounded-md transition-colors flex items-center gap-2 cursor-pointer"
+                title="Supprimer définitivement toutes les inscriptions et preuves Orange Money pour préparer la prochaine session"
+              >
+                <Trash2 className="w-4 h-4" />
+                <span>Nettoyer la console</span>
+              </button>
+            </div>
+          </div>
+        )}
+
         {currentTab === 'dashboard' && adminStats && (
           <div className="space-y-5">
             {/* Revenue snapshot */}
@@ -1276,6 +1360,87 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToClient, curren
                 >
                   <AlertTriangle className="w-4 h-4" />
                   <span>Confirmer la Révocation</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ==================================================================== */}
+      {/* MODAL 3: POST-WORKSHOP CONSOLE WIPE CONFIRMATION */}
+      {/* ==================================================================== */}
+      {isWipeModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fade-in">
+          <div className="w-full max-w-md bg-white dark:bg-[#0A0A0A] border-2 border-red-500 dark:border-red-800 rounded-xl overflow-hidden shadow-2xl flex flex-col">
+            <div className="px-5 py-4 border-b border-slate-200 dark:border-[#222222] bg-red-50 dark:bg-[#100707] flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <AlertTriangle className="w-5 h-5 text-[#E50914]" />
+                <h3 className="text-sm font-bold font-montserrat text-slate-900 dark:text-white">
+                  Nettoyer la console pour la prochaine session ?
+                </h3>
+              </div>
+              <button
+                onClick={() => setIsWipeModalOpen(false)}
+                className="p-1 text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white rounded cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-4 text-xs font-inter text-slate-700 dark:text-slate-300">
+              <p className="leading-relaxed">
+                Cette action est <strong className="text-[#E50914]">irréversible</strong>. Elle supprime définitivement
+                toutes les données de billetterie pour préparer la prochaine formation :
+              </p>
+
+              <ul className="p-3 rounded bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-900/50 text-[11px] space-y-1.5">
+                <li>· <strong>{participants.length}</strong> inscription(s) de participant(s)</li>
+                <li>· Toutes les preuves de paiement Orange Money stockées</li>
+                <li>· Codes de billets &amp; jetons cryptographiques émis</li>
+              </ul>
+
+              <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                Le journal d'audit immuable est conservé (conformité traçabilité) et documentera ce nettoyage.
+                Pensez à imprimer le rapport PDF <strong>avant</strong> de valider.
+              </p>
+
+              <div>
+                <label className="block text-[11px] font-semibold text-slate-800 dark:text-slate-300 mb-1.5 font-montserrat">
+                  Tapez «&nbsp;NETTOYER&nbsp;» pour confirmer :
+                </label>
+                <input
+                  type="text"
+                  value={wipeConfirmText}
+                  onChange={(e) => setWipeConfirmText(e.target.value)}
+                  placeholder="NETTOYER"
+                  className="w-full px-3 py-2 bg-slate-50 dark:bg-[#121212] border border-slate-300 dark:border-[#2A2A2A] focus:border-[#E50914] rounded-md text-xs text-slate-900 dark:text-white font-mono outline-none"
+                />
+              </div>
+
+              <div className="pt-2 flex items-center justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={() => setIsWipeModalOpen(false)}
+                  className="px-4 py-2 text-xs font-medium text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white transition-colors cursor-pointer"
+                >
+                  Annuler
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleExecuteWipe}
+                  disabled={isWiping || wipeConfirmText.trim().toUpperCase() !== 'NETTOYER'}
+                  className="px-5 py-2.5 text-xs font-bold font-montserrat text-white bg-red-600 hover:bg-red-700 disabled:bg-slate-300 dark:disabled:bg-slate-800 disabled:text-slate-500 rounded-md transition-colors flex items-center gap-1.5 cursor-pointer shadow-lg shadow-red-600/20 disabled:cursor-not-allowed"
+                >
+                  {isWiping ? (
+                    <span>Nettoyage en cours...</span>
+                  ) : (
+                    <>
+                      <Trash2 className="w-4 h-4" />
+                      <span>Confirmer le Nettoyage</span>
+                    </>
+                  )}
                 </button>
               </div>
             </div>
