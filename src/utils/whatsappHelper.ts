@@ -86,46 +86,35 @@ export function generateWhatsAppConfirmationUrl(
 ): { url: string; rawMessage: string } {
   const msg = resolveMessageInfo(info);
   const cleanPhone = participant.phoneInternational.replace(/[^\d]/g, '');
-  const verificationLink = participant.cryptoToken 
-    ? `${siteUrl}/#verify?token=${encodeURIComponent(participant.cryptoToken)}`
-    : `${siteUrl}?ticket=${participant.ticketCode}`;
+  // Lien de vérification cryptographique : logé dans le QR Code du PDF
+  // (pdfGenerator.ts). Le message WhatsApp ne contient QUE le lien du PDF
+  // (court, robuste sur tous les terminaux) — la page #verify s'ouvre quand
+  // le participant scanne son QR.
   // Facture PDF générée par le serveur : ne répond que si le dossier est CONFIRMED
   const invoiceUrl = `${siteUrl}/api/ticket/${participant.id}/pdf`;
 
   const rawMessage = [
     `🔴 *PIGA STUDIO — ${msg.decorativeName.toUpperCase()} : ACCÈS CONFIRMÉ*`,
-    `_The AI Venture Studio & Tech Media | Empowering the next generation of creators_`,
+    `_The AI Venture Studio & Tech Media_`,
     `━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
-    `Félicitations *${participant.fullName.trim()}*, votre inscription au Masterclass Exécutif est officiellement validée.`,
+    `Félicitations *${participant.fullName.trim()}*, votre inscription est officiellement validée.`,
     ``,
     `🎓 *Formation :* ${msg.decorativeName}`,
-    `📅 *Date de session :* ${msg.dateDisplay}`,
-    `⏰ *Horaires :* ${msg.timeDisplay}`,
+    `📅 *Quand :* ${msg.dateDisplay} · ${msg.timeDisplay}`,
     `🎫 *Code Billet :* \`${participant.ticketCode || 'PIGA-AA-2026'}\``,
-    `💳 *Montant réglé :* ${(participant.priceUsd ?? 20).toFixed(2)} USD (Vérifié via Orange Money)`,
-    `🔖 *Réf. Orange Money :* \`${participant.transactionReference}\``,
+    `💳 *Montant :* ${(participant.priceUsd ?? 20).toFixed(2)} USD (Orange Money \`${participant.transactionReference}\`)`,
     ``,
-    `🎫 *VOTRE LIASSEZ-PASSER OFFICIEL — QR CODE D'ACCÈS :*`,
+    `🎫 *VOTRE BILLET PDF — QR CODE D'ACCÈS :*`,
     `${invoiceUrl}`,
-    `_👉 Ce lien s'ouvre directement sur votre Facture / Billet PDF officiel._`,
-    `_Le QR Code d'accès officiel est DANS le PDF : téléchargez-le, imprimez-le ou gardez-le sur votre téléphone — il sera scanné au contrôle d'accès._`,
+    `_👉 Ce lien OUVRIRA votre Facture / Billet PDF officiel._`,
+    `_Le QR Code d'accès est DANS le PDF : téléchargez-le ou imprimez-le, il sera scanné à l'accueil._`,
     ``,
-    `🔍 *Vérification en ligne du PDF reçu (1 clic — ouvre votre billet) :*`,
-    `${invoiceUrl}`,
-    ``,
-    `🔐 *Authentification Cryptographique détaillée (AES-256-GCM, facultatif) :*`,
-    `${verificationLink}`,
-    ``,
-    `🚀 *Rejoindre la Communauté VIP PIGA STUDIO :*`,
+    `🚀 *Communauté VIP :*`,
     `${msg.vipWhatsAppUrl}`,
     ``,
-    `📌 *Consignes d'accès :*`,
-    `• Téléchargez votre Billet PDF ci-dessus — votre QR Code officiel s'y trouve`,
-    `• Le QR Code sera scanné à l'accueil (contrôle d'accès officiel PIGA)`,
-    `• Laptop configuré avec Python 3.11+ et Node.js 20+`,
     `━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
-    `Direction PIGA STUDIO : ${msg.directionEmail} · Tél : ${msg.directionPhone}`,
-    `💬 *WhatsApp Direction :* ${msg.directionWhatsAppUrl}`,
+    `💬 WhatsApp Direction : ${msg.directionWhatsAppUrl}`,
+    `📧 ${msg.directionEmail}`,
     `_PIGA STUDIO — ${msg.tagline}_`
   ].join('\n');
 
