@@ -47,7 +47,8 @@ export const ClientFooter: React.FC<ClientFooterProps> = ({
                 {footerAbout}
               </p>
             </div>
-            <div className="text-xs font-poppins text-[#E50914] font-semibold whitespace-nowrap">
+            {/* Tagline — s'enroule en lignes successives (jamais hors écran) */}
+            <div className="text-xs font-poppins text-[#E50914] font-semibold break-words max-w-full leading-relaxed">
               {tagline}
             </div>
           </div>

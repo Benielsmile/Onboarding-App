@@ -60,9 +60,10 @@ try {
     Copy-Item $source (Join-Path $outDir 'logo-symbol.png') -Force
     Write-Output 'Genere: logo-symbol.png (splash pre-paint)'
 
-    # Favicon navigateur (petit, plein cadre sur transparent)
-    New-Icon -Size 32  -Scale 1.0 -Background 'transparent' -OutFile 'favicon-32x32.png'
-    New-Icon -Size 96  -Scale 1.0 -Background 'transparent' -OutFile 'favicon-96x96.png'
+    # Favicon navigateur : le symbole officiel, copie EXACTE sans retouche
+    # (src/assets/icon/PIGA LOGO SYMBOL.png) — source unique, aucun variant default
+    Copy-Item $source (Join-Path $outDir 'favicon.png') -Force
+    Write-Output 'Genere: favicon.png (copie exacte du symbole officiel)'
 
     # Apple touch (iOS : pas de transparence, fond noir de la marque)
     New-Icon -Size 180 -Scale 0.80 -Background '#000000' -OutFile 'apple-touch-icon.png'
