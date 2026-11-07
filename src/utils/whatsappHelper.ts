@@ -14,8 +14,25 @@ import type { Participant } from '../types/index.ts';
 export const PIGA_DIRECTION_EMAIL = 'Benielsmile89@gmail.com';
 export const PIGA_DIRECTION_PHONE = '+243997406281';
 export const PIGA_DIRECTION_PHONE_LOCAL = '0997406281';
+/**
+ * CANAL WHATSAPP OFFICIEL — Direction PIGA STUDIO.
+ * Toute manipulation WhatsApp (conciergerie, contact, régularisation de
+ * paiement) renvoie exclusivement vers le numéro Direction 0997406281.
+ * Le numéro Orange Money (0803240289) reste STRICTEMENT réservé à l'encaissement.
+ */
+export const PIGA_DIRECTION_WHATSAPP_NUMBER = '+243997406281';
+export const PIGA_DIRECTION_WHATSAPP_URL = 'https://wa.me/243997406281';
 export const PIGA_ORANGE_MONEY_NUMBER = '+243803240289';
 export const PIGA_ORANGE_MONEY_DISPLAY = '+243 803 240 289';
+
+/** Construit une URL wa.me à partir du téléphone Direction (local 09... ou +243 9...) */
+export function directionWhatsAppLink(directionPhoneOrNumber?: string): string {
+  const digits = (directionPhoneOrNumber || '').replace(/[^\d]/g, '');
+  if (!digits || digits.length < 8) return '';
+  // 0XX -> +243XX (format national congolais) ; sinon on garde tel quel
+  const intl = digits.startsWith('0') ? `243${digits.slice(1)}` : digits;
+  return `https://wa.me/${intl}`;
+}
 
 const DEFAULT_VIP_TRAINING_COMMUNITY_URL = 'https://chat.whatsapp.com/PigaArsenalAgentique2026';
 
@@ -49,6 +66,7 @@ export function resolveMessageInfo(info?: FormationMessageInfo) {
     orangeMoneyHolder: info?.orangeMoneyHolder?.trim() || 'PIGA STUDIO',
     directionEmail: info?.directionEmail?.trim() || PIGA_DIRECTION_EMAIL,
     directionPhone: info?.directionPhone?.trim() || PIGA_DIRECTION_PHONE_LOCAL,
+    directionWhatsAppUrl: directionWhatsAppLink(info?.directionPhone) || PIGA_DIRECTION_WHATSAPP_URL,
     vipWhatsAppUrl: info?.vipWhatsAppUrl?.trim() || DEFAULT_VIP_TRAINING_COMMUNITY_URL
   };
 }
@@ -93,6 +111,7 @@ export function generateWhatsAppConfirmationUrl(
     `• Laptop configuré avec Python 3.11+ et Node.js 20+`,
     `━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
     `Direction PIGA STUDIO : ${msg.directionEmail} · Tél : ${msg.directionPhone}`,
+    `💬 *WhatsApp Direction :* ${msg.directionWhatsAppUrl}`,
     `_PIGA STUDIO — ${msg.tagline}_`
   ].join('\n');
 
@@ -130,6 +149,8 @@ export function generateWhatsAppRevocationUrl(
     ``,
     `📧 Email Direction : ${msg.directionEmail}`,
     `📞 Téléphone Direction : ${msg.directionPhone}`,
+    `💬 *WhatsApp Direction (canal officiel) :* ${msg.directionWhatsAppUrl}`,
+    `_Toute manipulation WhatsApp renvoie exclusivement au numéro Direction. Le numéro Orange Money sert uniquement à l'encaissement._`,
     `━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
     `_PIGA STUDIO — Service de Contrôle & Billetterie_`
   ].join('\n');

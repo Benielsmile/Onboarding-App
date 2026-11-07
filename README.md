@@ -158,4 +158,6 @@ multi-instance-ready.
 ## 📞 Contact & Support
 
 **PIGA STUDIO** — The AI Venture Studio & Tech Media
-☎️ Orange Money : +243 803 240 289 · Direction : voir `.env` (`ADMIN_EMAIL`)
+💬 WhatsApp Direction : +243 997 406 281 (https://wa.me/243997406281) — **canal officiel de toute manipulation WhatsApp**
+☎️ Orange Money : +243 803 240 289 — **strictement réservé à l'encaissement des paiements (non négociable)**
+📧 Direction : voir `.env` (`ADMIN_EMAIL`)

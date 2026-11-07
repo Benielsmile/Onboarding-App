@@ -13,7 +13,7 @@
  */
 
 import React, { useState } from 'react';
-import { X, Check, AlertCircle, Upload, ShieldCheck, ArrowRight, ArrowLeft, Copy, CheckCircle2, Clock, MessageSquare, FileDown } from 'lucide-react';
+import { X, Check, AlertCircle, Upload, ShieldCheck, ArrowRight, ArrowLeft, Copy, CheckCircle2, Clock, MessageSquare, FileDown, MessageCircle } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { cleanAndValidateDRCPhone } from '../utils/drcPhoneValidator.ts';
 import { api } from '../services/api.ts';
@@ -21,7 +21,9 @@ import { triggerNativePushNotification } from '../utils/pwaNotifications.ts';
 import {
   PIGA_ORANGE_MONEY_DISPLAY,
   PIGA_DIRECTION_EMAIL,
-  PIGA_DIRECTION_PHONE_LOCAL
+  PIGA_DIRECTION_PHONE_LOCAL,
+  directionWhatsAppLink,
+  PIGA_DIRECTION_WHATSAPP_URL
 } from '../utils/whatsappHelper.ts';
 import type { RegistrationResponse, ProgramConfig } from '../types/index.ts';
 
@@ -77,6 +79,8 @@ export const ClientOnboardingModal: React.FC<ClientOnboardingModalProps> = ({
   const orangeHolder = programConfig?.orangeMoneyHolder || 'PIGA STUDIO';
   const directionEmail = programConfig?.directionEmail || PIGA_DIRECTION_EMAIL;
   const directionPhone = programConfig?.directionPhone || PIGA_DIRECTION_PHONE_LOCAL;
+  // Canal WhatsApp officiel : toujours le numéro Direction (0997406281).
+  const directionWhatsAppUrl = directionWhatsAppLink(programConfig?.directionPhone) || PIGA_DIRECTION_WHATSAPP_URL;
   const programTitle = programConfig?.title || 'Arsenal Agentique';
   const dateDisplay = programConfig?.dateDisplay || '13 Novembre 2026';
   const ndaTitle = programConfig?.ndaTitle || 'ACCORD DE CONFIDENTIALITÉ & PROTECTION DES ACTIFS INTELLECTUELS (DNA & IP)';
@@ -528,6 +532,15 @@ export const ClientOnboardingModal: React.FC<ClientOnboardingModalProps> = ({
                 <div className="text-[11px] text-slate-600 dark:text-slate-400 flex flex-col gap-0.5 pt-1">
                   <div>Titulaire : <strong>{orangeHolder}</strong></div>
                   <div>Contact Direction : {directionEmail} · {directionPhone}</div>
+                  <a
+                    href={directionWhatsAppUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 w-fit text-[#128C7E] hover:text-[#0B6B60] font-semibold transition-colors cursor-pointer"
+                  >
+                    <MessageCircle className="w-3.5 h-3.5" />
+                    <span>Régulariser / Questions sur WhatsApp : Direction {directionPhone}</span>
+                  </a>
                 </div>
               </div>
 

@@ -12,6 +12,7 @@ import { PigaLogo } from '../components/PigaLogo.tsx';
 import { ThemeToggle } from '../components/ThemeToggle.tsx';
 import { Lock, Mail, Phone, ShieldCheck } from 'lucide-react';
 import type { ProgramConfig } from '../types/index.ts';
+import { directionWhatsAppLink } from '../utils/whatsappHelper.ts';
 
 interface ClientFooterProps {
   programConfig?: ProgramConfig;
@@ -30,6 +31,8 @@ export const ClientFooter: React.FC<ClientFooterProps> = ({
     `The AI Venture Studio & Tech Media | Empowering the next generation of creators. Plateforme d’ingénierie et d’accréditation — ${programConfig?.title || 'formations PIGA STUDIO'} (${programConfig?.dateDisplay || 'session à venir'}).`;
   const directionEmail = programConfig?.directionEmail || 'Benielsmile89@gmail.com';
   const directionPhoneLocal = programConfig?.directionPhone || '0997406281';
+  // Canal WhatsApp officiel : toujours le numéro Direction (0997406281).
+  const directionWhatsAppUrl = directionWhatsAppLink(programConfig?.directionPhone) || 'https://wa.me/243997406281';
   const orangeMoneyDisplay = programConfig?.orangeMoneyNumber || '+243 803 240 289';
 
   return (
@@ -103,10 +106,15 @@ export const ClientFooter: React.FC<ClientFooterProps> = ({
                 <Mail className="w-3.5 h-3.5 text-[#E50914]" />
                 <span>{directionEmail}</span>
               </a>
-              <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-[#FAFAF9] dark:bg-[#0A0A0A] border border-slate-200 dark:border-[#1A1A1A] text-[11px] font-medium text-slate-700 dark:text-slate-300">
+              <a
+                href={directionWhatsAppUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-[#FAFAF9] dark:bg-[#0A0A0A] border border-slate-200 dark:border-[#1A1A1A] text-[11px] font-medium text-slate-700 dark:text-slate-300 hover:border-[#E50914]/50 hover:text-[#E50914] transition-colors cursor-pointer"
+              >
                 <Phone className="w-3.5 h-3.5 text-[#E50914]" />
-                <span>Direction : {directionPhoneLocal}</span>
-              </div>
+                <span>WhatsApp Direction : {directionPhoneLocal}</span>
+              </a>
               <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-[#E50914]/5 border border-[#E50914]/25 text-[11px] font-medium font-mono text-[#E50914]">
                 <ShieldCheck className="w-3.5 h-3.5" />
                 <span>Orange Money Récepteur : {orangeMoneyDisplay}</span>

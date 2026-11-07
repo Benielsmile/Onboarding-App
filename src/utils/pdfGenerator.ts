@@ -210,6 +210,12 @@ export async function generateTicketPDF(
     16,
     142
   );
+  doc.setTextColor(100, 100, 100);
+  doc.text(
+    `💬 Canal WhatsApp officiel : ${msg.directionWhatsAppUrl} (exclusivement — l'Orange Money ${msg.orangeMoneyNumber} sert uniquement à l'encaissement)`,
+    16,
+    145.5
+  );
 
   return doc;
 }
