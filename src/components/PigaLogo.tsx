@@ -56,33 +56,19 @@ export const PigaLogo: React.FC<PigaLogoProps> = ({
     xl: 'h-16 sm:h-20'
   }[size];
 
-  // SYMBOL-ONLY : glyphe géométrique officiel (parallélogramme + capsule + triangle),
-  // sans wordmark — destiné aux très petits écrans où "PIGA STUDIO" ne tient pas.
+  // SYMBOL-ONLY : le fichier officiel src/assets/icon/PIGA LOGO SYMBOL.png
+  // (copie byte-identique servie en /logo-symbol.png, préchargée pour le
+  // splash). Aucune redessine SVG improvisée — LE fichier de la Direction.
   if (variant === 'symbol-only') {
     return (
       <div className={`inline-flex items-center select-none ${className}`} title="PIGA STUDIO">
-        <svg
-          viewBox="0 0 160 160"
-          className={`${heightClasses} w-auto`}
-          fill="none"
-          xmlns="http://www.w3.org/2000/svg"
-          role="img"
-          aria-label="PIGA STUDIO"
-        >
-          {/* Parallélogramme cadre */}
-          <path
-            d="M 62 22 L 112 22 L 42 140 L -8 140 Z"
-            stroke={isLight ? '#000000' : '#FFFFFF'}
-            strokeWidth="12"
-            strokeLinejoin="round"
-          />
-          {/* Capsule rouge (angle -45°, sans texte — trop petit pour lire) */}
-          <g transform="translate(60, 88) rotate(-45)">
-            <rect x="0" y="0" width="84" height="30" rx="6" fill="#E50914" />
-          </g>
-          {/* Triangle rouge */}
-          <polygon points="128,66 156,118 100,118" fill="#E50914" />
-        </svg>
+        <img
+          src="/logo-symbol.png"
+          alt="PIGA STUDIO"
+          draggable={false}
+          className={`${heightClasses} w-auto object-contain drop-shadow-sm`}
+          onError={(e) => { e.currentTarget.style.visibility = 'hidden'; }}
+        />
       </div>
     );
   }
