@@ -41,7 +41,8 @@ import {
   TrendingUp,
   Printer,
   Trash2,
-  Copy
+  Copy,
+  ChevronDown
 } from 'lucide-react';
 // — Aucun import html5-qrcode : moteur natif BarcodeDetector + flux caméra pilotés ici —
 import { PigaLogo } from '../components/PigaLogo.tsx';
@@ -84,6 +85,8 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToClient, curren
 
   // Active Tab: 'dashboard' | 'participants' | 'scanner' | 'audit'
   const [currentTab, setCurrentTab] = useState<'formation' | 'dashboard' | 'participants' | 'scanner' | 'audit'>('formation');
+  // Mobile navbar: collapsible / expandable (dernière pièce UX mobile)
+  const [isMobileNavOpen, setIsMobileNavOpen] = useState(false);
 
   // Core Data
   const [participants, setParticipants] = useState<Participant[]>([]);
@@ -595,6 +598,15 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToClient, curren
   const revokedCount = participants.filter(p => p.status === 'REVOKED').length;
   const totalRevenue = participants.reduce((sum, p) => p.status === 'CONFIRMED' ? sum + (p.priceUsd ?? 20) : sum, 0);
 
+  // Sources de la nav mobile et desktop (icônes + libellés centralisés)
+  const adminNavItems: Array<{ id: 'formation' | 'dashboard' | 'participants' | 'scanner' | 'audit'; label: string; icon: React.ReactNode }> = [
+    { id: 'formation', label: 'Formation & Landing Page', icon: <SlidersHorizontal className="w-4 h-4" /> },
+    { id: 'dashboard', label: 'Historique des Ventes', icon: <TrendingUp className="w-4 h-4" /> },
+    { id: 'participants', label: `Participants Orange Money (${participants.length})`, icon: <Users className="w-4 h-4" /> },
+    { id: 'scanner', label: 'Scanner & Vérificateur GCM', icon: <QrCode className="w-4 h-4" /> },
+    { id: 'audit', label: `Journal d'Audit Immuable (${auditLogs.length})`, icon: <Activity className="w-4 h-4" /> }
+  ];
+
   // --------------------------------------------------------------------------
   // LOGIN SCREEN
   // --------------------------------------------------------------------------
@@ -843,9 +855,57 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToClient, curren
           </div>
         </div>
 
-        {/* Admin Navigation Bar / Sidebar Tabs */}
-        <div className="flex items-center justify-between border-b border-slate-200 dark:border-[#1E1E1E] pb-3">
-          <div className="flex flex-wrap items-center gap-2">
+        {/* Admin Navigation Bar / Sidebar Tabs
+            — MOBILE : bandeau repliable (collapsible / expandable)
+            — DESKTOP : onglets horizontaux (inchangés) */}
+        <div className="border-b border-slate-200 dark:border-[#1E1E1E] pb-3">
+          {/* MOBILE — déclencheur + menu déroulant */}
+          <div className="md:hidden">
+            <button
+              onClick={() => setIsMobileNavOpen(v => !v)}
+              className="w-full flex items-center justify-between gap-3 px-4 py-3.5 rounded-lg bg-slate-100 dark:bg-[#0E0E0E] border-2 border-slate-200 dark:border-[#1E1E1E] cursor-pointer transition-colors hover:border-[#E50914]/50"
+              aria-expanded={isMobileNavOpen}
+              aria-controls="admin-mobile-nav"
+            >
+              <span className="flex items-center gap-2.5 text-sm font-bold font-montserrat text-slate-900 dark:text-white truncate">
+                {adminNavItems.find(n => n.id === currentTab)?.icon}
+                <span className="truncate">{adminNavItems.find(n => n.id === currentTab)?.label}</span>
+              </span>
+              <span className="flex items-center gap-2 shrink-0">
+                <span className="text-[10px] font-mono text-[#E50914] font-bold">{adminNavItems.findIndex(n => n.id === currentTab) + 1}/{adminNavItems.length}</span>
+                <ChevronDown className={`w-5 h-5 text-[#E50914] transition-transform duration-200 ${isMobileNavOpen ? 'rotate-180' : ''}`} />
+              </span>
+            </button>
+
+            {isMobileNavOpen && (
+              <div id="admin-mobile-nav" className="mt-2 rounded-lg bg-white dark:bg-[#0A0A0A] border border-slate-200 dark:border-[#1E1E1E] overflow-hidden shadow-md animate-fade-in">
+                {adminNavItems.map(item => {
+                  const active = item.id === currentTab;
+                  return (
+                    <button
+                      key={item.id}
+                      onClick={() => { setCurrentTab(item.id); setIsMobileNavOpen(false); }}
+                      className={`w-full flex items-center justify-between px-4 py-4 border-b last:border-0 border-slate-100 dark:border-[#141414] text-[15px] font-semibold font-montserrat cursor-pointer transition-colors ${
+                        active
+                          ? 'bg-[#E50914]/10 text-[#E50914] dark:text-[#E50914]'
+                          : 'text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-[#111111]'
+                      }`}
+                    >
+                      <span className="flex items-center gap-3 min-w-0">
+                        {item.icon}
+                        <span className="truncate">{item.label}</span>
+                      </span>
+                      {active ? <Check className="w-5 h-5 text-[#10B981] shrink-0" /> : <ChevronDown className="w-4 h-4 text-slate-300 shrink-0 -rotate-90" />}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* DESKTOP — onglets horizontaux */}
+          <div className="hidden md:flex items-center justify-between">
+            <div className="flex flex-wrap items-center gap-2">
             <button
               onClick={() => setCurrentTab('formation')}
               className={`px-4 py-2 text-xs font-bold font-montserrat rounded-md transition-colors cursor-pointer flex items-center gap-2 ${
@@ -905,6 +965,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToClient, curren
               <Activity className="w-3.5 h-3.5" />
               <span>Journal d'Audit Immuable ({auditLogs.length})</span>
             </button>
+            </div>
           </div>
         </div>
 
