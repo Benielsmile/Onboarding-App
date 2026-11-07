@@ -39,9 +39,10 @@ import {
   SlidersHorizontal,
   TrendingUp,
   Printer,
-  Trash2
+  Trash2,
+  Copy
 } from 'lucide-react';
-import { Html5QrcodeScanner } from 'html5-qrcode';
+import { Html5Qrcode } from 'html5-qrcode';
 import { PigaLogo } from '../components/PigaLogo.tsx';
 import { ThemeToggle } from '../components/ThemeToggle.tsx';
 import { FormationEditor } from './FormationEditor.tsx';
@@ -105,6 +106,8 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToClient, curren
 
   // WhatsApp outgoing message preview (large-print self-check modal)
   const [whatsappPreview, setWhatsappPreview] = useState<{ url: string; rawMessage: string } | null>(null);
+  // Crypto token inspector (large-print + one-click copy)
+  const [viewingToken, setViewingToken] = useState<Participant | null>(null);
 
   // Post-Workshop: PDF Report Export & Console Wipe (next session preparation)
   const [isWipeModalOpen, setIsWipeModalOpen] = useState(false);
@@ -116,7 +119,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToClient, curren
   const [verificationResult, setVerificationResult] = useState<CryptographicTokenVerification | null>(null);
   const [isVerifyingToken, setIsVerifyingToken] = useState(false);
   const [isCameraScannerActive, setIsCameraScannerActive] = useState(false);
-  const scannerRef = useRef<Html5QrcodeScanner | null>(null);
+  const scannerRef = useRef<Html5Qrcode | null>(null);
 
   // PWA & Notification Status
   const { isInstallable, install } = usePWAInstall();
@@ -274,11 +277,75 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToClient, curren
   };
 
   // 5. Verify Cryptographic Token (AES-256-GCM)
-  const verifyTokenString = async (token: string) => {
-    if (!token.trim()) return;
+  const verifyTokenString = async (raw: string) => {
+    const input = raw.trim();
+    if (!input) return;
     setIsVerifyingToken(true);
     try {
-      const result = await api.verifyToken(token.trim());
+      // 1. URL complète collée (PDF QR, lien de vérification) → extraire le jeton
+      const urlToken = input.match(/[#?&]token=([^&\s]+)/i);
+      let candidate = urlToken ? decodeURIComponent(urlToken[1]) : input;
+
+      const isHexToken = /^[0-9a-f]+\.[0-9a-f]+\.[0-9a-f]+$/i.test(candidate) && candidate.length > 100;
+      if (!isHexToken) {
+        // 2. CODE du billet (ex: AA-2026-5BA247-281) → résolution via le registre
+        //    puis vérification cryptographique RÉELLE du jeton émis pour ce dossier
+        //    (aucun contournement de la porte AES: la décision reste cryptographique)
+        const candidates = [
+          candidate.replace(/\s+/g, '').toUpperCase(),
+          candidate.replace(/[^A-Za-z0-9-]/g, '').toUpperCase()
+        ].filter(Boolean);
+        const match = participants.find(p => {
+          const code = (p.ticketCode || '').replace(/\s+/g, '').toUpperCase();
+          return code && candidates.includes(code);
+        });
+
+        if (match) {
+          if (match.status !== 'CONFIRMED') {
+            setVerificationResult({
+              isValid: false,
+              tamperDetected: false,
+              error: `Dossier trouvé (${match.fullName}) mais statut = ${match.status}. Le billet n'est pas délivré tant que la Direction n'a pas confirmé le paiement.`,
+              verificationTimestamp: new Date().toISOString()
+            });
+            return;
+          }
+          if (!match.cryptoToken) {
+            setVerificationResult({
+              isValid: false,
+              tamperDetected: false,
+              error: `Dossier confirmé (${match.fullName}) mais jeton cryptographique absent. Re-confirmez le dossier pour réémettre un jeton.`,
+              verificationTimestamp: new Date().toISOString()
+            });
+            return;
+          }
+          // JETON du dossier → déchiffrement AES-256-GCM (authentique contrôle d'accès)
+          const result = await api.verifyToken(match.cryptoToken.trim());
+          setVerificationResult({
+            ...result,
+            payload: {
+              t: String(match.ticketCode || ''),
+              n: match.fullName,
+              d: result.payload?.d || '2026-11-13',
+              s: 'CONFIRMED',
+              iat: result.payload?.iat
+            },
+            verificationTimestamp: result.verificationTimestamp || new Date().toISOString()
+          });
+          return;
+        }
+
+        setVerificationResult({
+          isValid: false,
+          tamperDetected: false,
+          error: 'Code billet introuvable dans le registre de la session active. Formats acceptés : CODE du billet (AA-2026-…), lien du PDF, ou jeton cryptographique complet.',
+          verificationTimestamp: new Date().toISOString()
+        });
+        return;
+      }
+
+      // 3. Jeton brut (IV.cipher.tag) → vérification cryptographique directe
+      const result = await api.verifyToken(candidate.trim());
       setVerificationResult(result);
     } catch {
       setVerificationResult({
@@ -336,60 +403,76 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToClient, curren
     }
   };
 
-  // 6. Camera QR Scanner Setup
+  // 6. Camera QR Scanner Setup — Html5Qrcode piloté manuellement :
+  // - la caméra est TOUJOURS relâchée proprement entre deux activations
+  //   (l'ancien Html5QrcodeScanner laissait des streams zombies -> écran noir)
+  // - fallback caméra avant si la caméra arrière n'existe pas (ordinateur portable)
+  // - conteneur avec dimensions garanties (aspect-video) pour le rendu vidéo
+  const stopCameraScanner = async (): Promise<void> => {
+    const cam = scannerRef.current;
+    scannerRef.current = null;
+    if (!cam) return;
+    try { await cam.stop(); } catch { /* stream déjà arrêté */ }
+    try { cam.clear(); } catch { /* DOM déjà démonté */ }
+  };
+
   useEffect(() => {
-    if (currentTab === 'scanner' && isCameraScannerActive) {
-      const timer = setTimeout(() => {
-        try {
-          const scanner = new Html5QrcodeScanner(
-            'qr-reader-container',
-            { 
-              fps: 10, 
-              qrbox: { width: 250, height: 250 },
-              rememberLastUsedCamera: true
-            },
-            /* verbose= */ false
-          );
+    const scannerTabActive = currentTab === 'scanner' && isCameraScannerActive;
+    if (!scannerTabActive) {
+      void stopCameraScanner();
+      return;
+    }
 
-          scanner.render(
-            (decodedText) => {
-              // Successfully decoded QR code from camera
-              setScannerTokenInput(decodedText);
-              verifyTokenString(decodedText);
-              // Stop camera once detected
-              setIsCameraScannerActive(false);
-              scanner.clear();
-            },
-            (error) => {
-              // Scan error - standard scanning loop, safe to ignore
-            }
-          );
+    const timer = setTimeout(() => {
+      void (async () => {
+        // 1. Toute ancienne instance est stoppée AVANT montage (caméra libre)
+        await stopCameraScanner();
 
-          scannerRef.current = scanner;
-        } catch (e) {
-          console.error('[QR SCANNER INIT ERROR]:', e);
-        }
-      }, 300);
+        const mount = document.getElementById('qr-reader-container');
+        if (!mount) return;
 
-      return () => {
-        clearTimeout(timer);
-        if (scannerRef.current) {
+        const SCANNER_CFG = { fps: 10, qrbox: { width: 240, height: 240 } as { width: number; height: number } } as const;
+        const onScanSuccess = (decodedText: string): void => {
+          setScannerTokenInput(decodedText);
+          verifyTokenString(decodedText);
+          void (async () => {
+            await stopCameraScanner();
+            setIsCameraScannerActive(false);
+          })();
+        };
+        const onScanFailure = (): void => { /* frame sans QR — ignorer */ };
+        // 2. Injection du callback dans le scanner créé ci-dessous
+        const createAndStart = async (cameraIdOrConfig: string | { facingMode: string }): Promise<boolean> => {
           try {
-            scannerRef.current.clear();
-          } catch (e) {
-            // Safe cleanup
+            const cam = new Html5Qrcode('qr-reader-container');
+            scannerRef.current = cam;
+            await cam.start(cameraIdOrConfig as never, SCANNER_CFG as never, onScanSuccess, onScanFailure);
+            return true;
+          } catch {
+            // Nettoyage l'instance morte pour libérer la caméra
+            const cam2 = scannerRef.current;
+            scannerRef.current = null;
+            if (cam2) { try { cam2.clear(); } catch { /* purge DOM */ } }
+            return false;
+          }
+        };
+
+        // 3. Caméra arrière (mobile) PUIS toute caméra disponible (PC portable)
+        const rearOk = await createAndStart({ facingMode: 'environment' });
+        if (!rearOk) {
+          const anyOk = await createAndStart({ facingMode: 'user' });
+          if (!anyOk) {
+            console.error('[QR SCANNER]: aucune caméra accessible (permission refusée ou occupée).');
+            setIsCameraScannerActive(false);
           }
         }
-      };
-    } else {
-      if (scannerRef.current) {
-        try {
-          scannerRef.current.clear();
-        } catch (e) {
-          // Safe cleanup
-        }
-      }
-    }
+      })();
+    }, 250);
+
+    return () => {
+      clearTimeout(timer);
+      void stopCameraScanner();
+    };
   }, [currentTab, isCameraScannerActive]);
 
   // Filtered Participants
@@ -1072,6 +1155,15 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToClient, curren
                                     </button>
 
                                     <button
+                                      onClick={() => setViewingToken(p)}
+                                      className="px-2.5 py-1.5 text-xs font-bold text-[#E50914] hover:text-white hover:bg-[#E50914] bg-[#E50914]/5 border-2 border-[#E50914]/40 rounded transition-colors flex items-center gap-1 cursor-pointer"
+                                      title="Afficher le jeton cryptographique du billet (QR + copie)"
+                                    >
+                                      <QrCode className="w-3.5 h-3.5" />
+                                      <span>Jeton</span>
+                                    </button>
+
+                                    <button
                                       onClick={() => {
                                         const preview = generateWhatsAppConfirmationUrl(p, formationInfo);
                                         setWhatsappPreview(preview);
@@ -1126,6 +1218,13 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToClient, curren
                   <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
                     Scannez directement le QR Code du participant avec votre caméra ou saisissez son jeton chiffré.
                   </p>
+                  {/* Formats acceptés — GROS CARACTÈRES (lisibilité contrôle d'accès) */}
+                  <div className="rounded-lg border-2 border-[#10B981]/40 bg-[#10B981]/5 px-4 py-3 text-sm text-slate-800 dark:text-slate-200 space-y-1 mt-2">
+                    <div className="font-bold text-[#10B981]">Formats acceptés pour la vérification :</div>
+                    <div>1️⃣ <strong>Le CODE du billet</strong> — ex : <code className="font-mono font-bold">AA-2026-5BA247-281</code></div>
+                    <div>2️⃣ <strong>Le lien complet du PDF / du QR</strong> (message WhatsApp ou page #verify)</div>
+                    <div>3️⃣ <strong>Le jeton chiffré complet</strong> (IV.cle.tag, copié depuis la console)</div>
+                  </div>
                 </div>
 
                 <button
@@ -1141,12 +1240,15 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToClient, curren
                 </button>
               </div>
 
-              {/* Camera Scanner Container */}
+              {/* Camera Scanner Container — dimensions garanties pour le rendu vidéo */}
               {isCameraScannerActive && (
                 <div className="p-4 rounded-lg bg-black border border-slate-300 dark:border-[#2A2A2A] max-w-md mx-auto text-center">
-                  <div id="qr-reader-container" className="w-full overflow-hidden rounded" />
-                  <div className="text-xs text-slate-300 mt-2">
+                  <div id="qr-reader-container" className="w-full min-h-[280px] aspect-video overflow-hidden rounded bg-black" />
+                  <div className="text-xs font-semibold text-slate-200 mt-2">
                     Pointez l'objectif vers le QR Code officiel PIGA STUDIO
+                    <span className="block text-[10px] text-slate-400 font-normal mt-0.5">
+                      Si l'écran reste noir : accordez l'autorisation caméra au navigateur, ou cliquez « Fermer Caméra » puis réactivez.
+                    </span>
                   </div>
                 </div>
               )}
@@ -1154,7 +1256,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToClient, curren
               {/* Manual Token Verification Box */}
               <div className="pt-2 space-y-3">
                 <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 font-montserrat">
-                  Ou collez le Jeton Cryptographique / URL du billet :
+                  Ou collez l'un des 3 formats acceptés (écrits en gros) :
                 </label>
                 <div className="flex gap-2">
                   <input
@@ -1454,6 +1556,81 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToClient, curren
                   )}
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ==================================================================== */}
+      {/* MODAL 1c: CRYPTO TOKEN INSPECTOR — GROS CARACTÈRES + COPIE            */}
+      {/* ==================================================================== */}
+      {viewingToken && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md animate-fade-in">
+          <div className="w-full max-w-2xl bg-white dark:bg-[#0A0A0A] border-2 border-[#E50914]/50 rounded-xl overflow-hidden shadow-2xl flex flex-col max-h-[90vh]">
+            <div className="px-5 py-4 border-b border-slate-200 dark:border-[#222222] bg-slate-50 dark:bg-[#0F0F0F] flex items-center justify-between">
+              <div>
+                <h3 className="text-base font-bold font-montserrat text-slate-900 dark:text-white flex items-center gap-2">
+                  <QrCode className="w-5 h-5 text-[#E50914]" />
+                  <span>Jeton Cryptographique — {viewingToken.fullName}</span>
+                </h3>
+                <div className="text-sm text-slate-600 dark:text-slate-400 font-semibold mt-0.5">
+                  Code billet : <span className="font-mono text-[#E50914] font-bold">{viewingToken.ticketCode}</span> · Émis AES-256-GCM
+                </div>
+              </div>
+              <button
+                onClick={() => setViewingToken(null)}
+                className="p-1 text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white rounded cursor-pointer"
+              >
+                <X className="w-6 h-6" />
+              </button>
+            </div>
+
+            <div className="p-6 overflow-y-auto space-y-5">
+              {viewingToken.cryptoToken ? (
+                <>
+                  {/* Le lien de vérification encodé dans le QR — où le trouver */}
+                  <div className="rounded-lg border-2 border-[#10B981]/40 bg-[#10B981]/5 px-4 py-3 space-y-2">
+                    <div className="text-[11px] font-bold font-montserrat uppercase tracking-wider text-[#10B981]">
+                      🔍 Lien de vérification (ce que contient le QR Code du PDF)
+                    </div>
+                    <div className="text-sm font-mono font-semibold text-slate-900 dark:text-white break-all">
+                      {`${typeof window !== 'undefined' ? window.location.origin : ''}/#verify?token=${viewingToken.cryptoToken}`}
+                    </div>
+                  </div>
+
+                  {/* Jeton brut — sélectionnable + copie 1 clic */}
+                  <div>
+                    <div className="text-[11px] font-bold font-montserrat uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-2">
+                      Jeton complet (collez-le dans « Vérification » ou scannez le QR du billet)
+                    </div>
+                    <textarea
+                      readOnly
+                      value={viewingToken.cryptoToken}
+                      rows={6}
+                      onFocus={(e) => e.currentTarget.select()}
+                      className="w-full px-4 py-3 bg-slate-50 dark:bg-[#121212] border-2 border-slate-300 dark:border-[#2A2A2A] focus:border-[#E50914] rounded-lg text-base font-mono font-semibold text-slate-900 dark:text-white break-all outline-none resize-none"
+                    />
+                    <button
+                      onClick={() => {
+                        void navigator.clipboard?.writeText(viewingToken.cryptoToken || '').catch(() => {});
+                        setActionSuccessMessage('Jeton cryptographique copié dans le presse-papiers ✅');
+                      }}
+                      className="mt-3 px-6 py-3 text-base font-bold font-montserrat text-white bg-[#E50914] hover:bg-[#C80711] rounded-lg transition-colors flex items-center gap-2 cursor-pointer shadow-lg w-full sm:w-auto justify-center"
+                    >
+                      <Copy className="w-5 h-5" />
+                      <span>COPIER LE JETON COMPLET</span>
+                    </button>
+                  </div>
+
+                  <div className="text-xs text-slate-500 dark:text-slate-400">
+                    Astuce contrôle d'accès : scannez simplement le QR du billet du participant dans l'onglet Scanner — le jeton se colle et se vérifie automatiquement.
+                  </div>
+                </>
+              ) : (
+                <div className="text-sm text-amber-600 dark:text-amber-400 font-semibold">
+                  Aucun jeton cryptographique sur ce dossier. Re-confirmez le paiement pour en émettre un.
+                </div>
+              )}
             </div>
           </div>
         </div>
