@@ -42,7 +42,7 @@ import {
   Trash2,
   Copy
 } from 'lucide-react';
-import { Html5Qrcode, Html5QrcodeSupportedFormats } from 'html5-qrcode';
+// — Aucun import html5-qrcode : moteur natif BarcodeDetector + flux caméra pilotés ici —
 import { PigaLogo } from '../components/PigaLogo.tsx';
 import { ThemeToggle } from '../components/ThemeToggle.tsx';
 import { FormationEditor } from './FormationEditor.tsx';
@@ -119,10 +119,17 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToClient, curren
   const [verificationResult, setVerificationResult] = useState<CryptographicTokenVerification | null>(null);
   const [isVerifyingToken, setIsVerifyingToken] = useState(false);
   const [isCameraScannerActive, setIsCameraScannerActive] = useState(false);
-  const scannerRef = useRef<Html5Qrcode | null>(null);
+  // Scanner pipeline (100% maison) : MediaStream direct + BarcodeDetector natif.
+  // Plus de Html5QrcodeScanner : la caméra, le relâchement et la boucle de
+  // décodage sont entièrement sous notre contrôle — comportement déterministe.
+  const cameraVideoRef = useRef<HTMLVideoElement | null>(null);
+  const cameraStreamRef = useRef<MediaStream | null>(null);
+  const scanTimerRef = useRef<number | null>(null);
+  const scanBusyRef = useRef(false);
   // Live scanner diagnostics (the user has weak eyesight — large readable feedback)
   const [scannerFrameCount, setScannerFrameCount] = useState(0);
   const [scannerLastError, setScannerLastError] = useState<string | null>(null);
+  const [hasNativeQrEngine, setHasNativeQrEngine] = useState<boolean | null>(null);
 
   // PWA & Notification Status
   const { isInstallable, install } = usePWAInstall();
@@ -411,102 +418,118 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToClient, curren
     }
   };
 
-  // 6. Camera QR Scanner Setup — Html5Qrcode piloté manuellement :
-  // - la caméra est TOUJOURS relâchée proprement entre deux activations
-  //   (l'ancien Html5QrcodeScanner laissait des streams zombies -> écran noir)
-  // - fallback caméra avant si la caméra arrière n'existe pas (ordinateur portable)
-  // - conteneur avec dimensions garanties (aspect-video) pour le rendu vidéo
-  const stopCameraScanner = async (): Promise<void> => {
-    const cam = scannerRef.current;
-    scannerRef.current = null;
-    if (!cam) return;
-    try { await cam.stop(); } catch { /* stream déjà arrêté */ }
-    try { cam.clear(); } catch { /* DOM déjà démonté */ }
+  // 6. Camera QR Scanner — PIPELINE 100% MAISON (zéro lib fragile) :
+  //    1) MediaStream direct (getUserMedia) -> <video> plein cadre
+  //    2) décodage par le moteur NATIF du navigateur (BarcodeDetector, Chrome)
+  //    3) boucle manuelle chaque 130ms, compte à rebours visible + erreurs en clair
+  //    La caméra est TOUJOURS relâchée proprement (plus de streams zombies).
+  type NativeBarcodeDetector = {
+    detect: (source: HTMLVideoElement | HTMLCanvasElement) => Promise<Array<{ rawValue: string }>>;
+  };
+  type BarcodeDetectorCtor = new (opts: { formats: string[] }) => NativeBarcodeDetector;
+
+  const stopCameraScanner = (): void => {
+    if (scanTimerRef.current !== null) { clearInterval(scanTimerRef.current); scanTimerRef.current = null; }
+    scanBusyRef.current = false;
+    const stream = cameraStreamRef.current;
+    cameraStreamRef.current = null;
+    if (stream) {
+      stream.getTracks().forEach(t => { try { t.stop(); } catch { /* déjà stop */ } });
+    }
+    const video = cameraVideoRef.current;
+    if (video) { try { video.srcObject = null; } catch { /* noop */ } }
   };
 
   useEffect(() => {
     const scannerTabActive = currentTab === 'scanner' && isCameraScannerActive;
     if (!scannerTabActive) {
-      void stopCameraScanner();
+      stopCameraScanner();
       return;
     }
 
+    setScannerFrameCount(0);
+    setScannerLastError(null);
+    setHasNativeQrEngine(null);
+
     const timer = setTimeout(() => {
       void (async () => {
-        // 1. Toute ancienne instance est stoppée AVANT montage (caméra libre)
-        await stopCameraScanner();
-        setScannerFrameCount(0);
-        setScannerLastError(null);
-
-        const mount = document.getElementById('qr-reader-container');
-        if (!mount) return;
-
-        // Cadence + fenêtre de scan responsive (80% du plus petit côté) +
-        // accélération native BarcodeDetector (Android/Chrome) + formats QR uniquement
-        const SCANNER_CFG = {
-          fps: 15,
-          qrbox: (vw: number, vh: number) => {
-            const side = Math.max(140, Math.floor(Math.min(vw, vh) * 0.8));
-            return { width: side, height: side };
-          },
-          formatsToSupport: [Html5QrcodeSupportedFormats.QR_CODE],
-          experimentalFeatures: { useBarCodeDetectorIfSupported: true },
-          showTorchButtonIfSupported: true
-        };
-
-        const onScanSuccess = (decodedText: string): void => {
-          setScannerTokenInput(decodedText);
-          verifyTokenString(decodedText);
-          void (async () => {
-            await stopCameraScanner();
-            setIsCameraScannerActive(false);
-          })();
-        };
-        let failureTick = 0;
-        const onScanFailure = (_img: unknown, err: unknown): void => {
-          failureTick += 1;
-          if (failureTick % 30 === 1) {
-            // Feedback visuel live : la boucle tourne bien
-            setScannerFrameCount(failureTick);
-          }
-          const msg = typeof err === 'string' ? err : err instanceof Error ? err.message : '';
-          if (msg && !msg.includes('NotFound')) setScannerLastError(msg);
-        };
-
-        const createAndStart = async (cameraIdOrConfig: string | { facingMode: string }): Promise<boolean> => {
-          try {
-            const cam = new Html5Qrcode('qr-reader-container', {
-              formatsToSupport: [Html5QrcodeSupportedFormats.QR_CODE],
-              verbose: false
-            });
-            scannerRef.current = cam;
-            await cam.start(cameraIdOrConfig as never, SCANNER_CFG as never, onScanSuccess, onScanFailure);
-            return true;
-          } catch (e) {
-            // Nettoyage de l'instance morte pour libérer la caméra
-            const cam2 = scannerRef.current;
-            scannerRef.current = null;
-            if (cam2) { try { cam2.clear(); } catch { /* purge DOM */ } }
-            setScannerLastError(e instanceof Error ? e.message : String(e));
-            return false;
-          }
-        };
-
-        // 3. Caméra arrière (mobile) PUIS toute caméra disponible (PC portable)
-        const rearOk = await createAndStart({ facingMode: 'environment' });
-        if (!rearOk) {
-          const anyOk = await createAndStart({ facingMode: 'user' });
-          if (!anyOk) {
-            console.error('[QR SCANNER]: aucune caméra accessible (permission refusée ou occupée).');
-            setIsCameraScannerActive(false);
-          }
+        stopCameraScanner();
+        const videoEl = document.getElementById('piga-camera-video') as HTMLVideoElement | null;
+        if (!videoEl) {
+          setScannerLastError('Élément vidéo introuvable — revenez sur l\'onglet Scanner.');
+          return;
         }
+
+        // --- Détection du moteur QR natif (Chrome Android/Desktop le possèdent) ---
+        const bdCtor = (window as unknown as { BarcodeDetector?: BarcodeDetectorCtor }).BarcodeDetector;
+        if (!bdCtor) {
+          setHasNativeQrEngine(false);
+          setScannerLastError('Ce navigateur n\'a pas le moteur QR natif. Utilisez Chrome (« Activer Caméra Scanner ») ou la Méthode 2 clics : bouton Jeton → COPIER → coller ici → Authentifier.');
+          return;
+        }
+        let detector: NativeBarcodeDetector;
+        try {
+          detector = new bdCtor({ formats: ['qr_code'] });
+        } catch (e) {
+          setHasNativeQrEngine(false);
+          setScannerLastError(`Moteur QR indisponible : ${e instanceof Error ? e.message : String(e)}`);
+          return;
+        }
+        setHasNativeQrEngine(true);
+
+        // --- Ouverture caméra DIRECTE (contraintes souples, jamais "Overconstrained") ---
+        let stream: MediaStream;
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({
+            video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 960 } },
+            audio: false
+          });
+        } catch (e) {
+          setScannerLastError(`Accès caméra refusé : ${e instanceof Error ? e.message : String(e)} — accordez l'autorisation dans l'icône cadenas de la barre d'adresse, puis réactivez.`);
+          setIsCameraScannerActive(false);
+          return;
+        }
+        cameraStreamRef.current = stream;
+        videoEl.srcObject = stream;
+        try { await videoEl.play(); } catch { /* autoplay bloqué — le flux reste attaché, un léger tap sur la vignette relance l'image */ }
+
+        // --- Boucle de décodage manuelle (130ms) : robuste et inspectable ---
+        let frameCount = 0;
+        scanTimerRef.current = window.setInterval(() => {
+          if (scanBusyRef.current) return; // un tick non fini → on saute
+          if (videoEl.readyState < 2) return; // vidéo pas prête
+          scanBusyRef.current = true;
+          detector.detect(videoEl)
+            .then(codes => {
+              frameCount += 1;
+              if (frameCount % 10 === 1) setScannerFrameCount(frameCount);
+              const hit = codes.find(c => (c.rawValue || '').trim().length > 0);
+              if (hit) {
+                const value = hit.rawValue.trim();
+                clearInterval(scanTimerRef.current ?? 0);
+                scanTimerRef.current = null;
+                setScannerTokenInput(value);
+                verifyTokenString(value);
+                stopCameraScanner();
+                setIsCameraScannerActive(false);
+              }
+            })
+            .catch((e: unknown) => {
+              frameCount += 1;
+              if (frameCount % 10 === 1) setScannerFrameCount(frameCount);
+              const msg = e instanceof Error ? e.message : String(e);
+              if (msg && !msg.toLowerCase().includes('notfound')) {
+                setScannerLastError(msg);
+              }
+            })
+            .finally(() => { scanBusyRef.current = false; });
+        }, 130);
       })();
     }, 250);
 
     return () => {
       clearTimeout(timer);
-      void stopCameraScanner();
+      stopCameraScanner();
     };
   }, [currentTab, isCameraScannerActive]);
 
@@ -1259,6 +1282,12 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToClient, curren
                     <div>1️⃣ <strong>Le CODE du billet</strong> — ex : <code className="font-mono font-bold">AA-2026-5BA247-281</code></div>
                     <div>2️⃣ <strong>Le lien complet du PDF / du QR</strong> (message WhatsApp ou page #verify)</div>
                     <div>3️⃣ <strong>Le jeton chiffré complet</strong> (IV.cle.tag, copié depuis la console)</div>
+                    <div className="pt-2 mt-2 border-t-2 border-slate-200 dark:border-[#1E1E1E] text-[#B45309] dark:text-amber-400 font-semibold">
+                      ⚠️ Important : la caméra ne peut JAMAIS lire un QR affiché sur le même téléphone. Sur mobile, utilisez la méthode 2 clics ci-dessous — ou scannez le billet affiché sur un AUTRE appareil (PC, impression, téléphone du client).
+                    </div>
+                    <div className="pt-1 text-[11px] text-slate-600 dark:text-slate-400">
+                      💡 <strong>Méthode 2 clics sur mobile :</strong> onglet Participants → ligne CONFIRMÉ → bouton « Jeton » → COPIER → revenez ici → collez dans ce champ → Authentifier. Le déchiffrement AES s'exécute instantanément.
+                    </div>
                   </div>
                 </div>
 
@@ -1275,19 +1304,25 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToClient, curren
                 </button>
               </div>
 
-              {/* Camera Scanner Container — dimensions garanties pour le rendu vidéo */}
+              {/* Camera Scanner Container — <video> natif piloté maison */}
               {isCameraScannerActive && (
                 <div className="p-4 rounded-lg bg-black border border-slate-300 dark:border-[#2A2A2A] max-w-md mx-auto text-center">
-                  <div id="qr-reader-container" className="w-full min-h-[280px] aspect-video overflow-hidden rounded bg-black" />
+                  <video
+                    id="piga-camera-video"
+                    ref={cameraVideoRef}
+                    autoPlay
+                    muted
+                    playsInline
+                    className="w-full min-h-[280px] aspect-video overflow-hidden rounded bg-black object-cover"
+                  />
                   {/* Diagnostics live — la boucle tourne-t-elle ? */}
                   <div className="mt-2 rounded-md border-2 border-[#10B981]/50 bg-[#10B981]/10 px-3 py-2">
                     <div className="text-sm font-bold font-mono text-[#10B981]">
                       🔍 Recherche active… {scannerFrameCount} image(s) analysée(s)
+                      {hasNativeQrEngine === true && <span className="ml-1 text-[10px] text-[#059669]">moteur QR natif ✅</span>}
                     </div>
                     {scannerLastError && (
-                      <div className="text-[11px] font-semibold text-amber-300 mt-1 break-all">
-                        {scannerLastError}
-                      </div>
+                      <div className="text-[11px] font-semibold text-amber-300 mt-1 break-all">{scannerLastError}</div>
                     )}
                   </div>
                   <div className="text-xs font-semibold text-slate-200 mt-2">
