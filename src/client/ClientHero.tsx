@@ -45,32 +45,32 @@ export const ClientHero: React.FC<ClientHeroProps> = ({
 
       <div className="max-w-6xl mx-auto px-6">
         {/* ============ Editorial Copy Block (centered) ============ */}
-        <div className="max-w-4xl mx-auto text-center space-y-7">
-          {/* Eyebrow pill : pulsing brand dot + meta */}
+        <div className="max-w-4xl mx-auto text-center space-y-7 px-1">
+          {/* Eyebrow pill : pulsing brand dot + meta — repliable sur ≤ 380px */}
           <div className="flex justify-center">
-            <div className="inline-flex items-center gap-2.5 bg-slate-50 dark:bg-[#0A0A0A] border border-slate-200 dark:border-[#1E1E1E] rounded-full pl-3 pr-4 py-1.5 shadow-xs">
-              <span className="relative flex h-2 w-2" aria-hidden="true">
+            <div className="inline-flex flex-wrap items-center justify-center gap-x-2.5 gap-y-1 max-w-full bg-slate-50 dark:bg-[#0A0A0A] border border-slate-200 dark:border-[#1E1E1E] rounded-2xl sm:rounded-full pl-3 pr-4 py-1.5 shadow-xs text-center">
+              <span className="relative flex h-2 w-2 shrink-0" aria-hidden="true">
                 <span className={`animate-ping absolute inline-flex h-full w-full rounded-full ${isSoldOut ? 'bg-slate-400' : 'bg-[#E50914]'} opacity-60`} />
                 <span className={`relative inline-flex rounded-full h-2 w-2 ${isSoldOut ? 'bg-slate-400' : 'bg-[#E50914]'}`} />
               </span>
-              <span className="text-[11px] font-bold font-montserrat uppercase tracking-wider text-slate-900 dark:text-white">
+              <span className="text-[11px] font-bold font-montserrat uppercase tracking-wider text-slate-900 dark:text-white break-words">
                 {programConfig.kicker || 'PIGA STUDIO TECH MEDIA'}
               </span>
-              <span className="w-1 h-1 rounded-full bg-slate-300 dark:bg-[#333333]" aria-hidden="true" />
-              <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 tracking-wide">
+              <span className="w-1 h-1 rounded-full bg-slate-300 dark:bg-[#333333] hidden sm:block" aria-hidden="true" />
+              <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 tracking-wide break-words">
                 {programConfig.dateDisplay}{programConfig.timeDisplay ? ` · ${programConfig.timeDisplay}` : ''}
               </span>
             </div>
           </div>
 
           {/* Oversized display headline */}
-          <h1 className="text-[clamp(38px,7vw,86px)] font-black font-montserrat tracking-[-0.035em] leading-[0.98] text-balance text-slate-900 dark:text-white">
+          <h1 className="text-[clamp(30px,8vw,86px)] font-black font-montserrat tracking-[-0.035em] leading-[0.98] text-balance text-slate-900 dark:text-white">
             {programConfig.title}
           </h1>
 
-          {/* Asterisk footnote tagline — subscrr style */}
+          {/* Asterisk footnote tagline — subscrr style — WRAP SAFETY 320px */}
           {programConfig.tagline && (
-            <p className="text-sm font-semibold font-poppins text-slate-400 dark:text-slate-500 tracking-wide text-center">
+            <p className="text-sm sm:text-base font-semibold font-poppins text-slate-400 dark:text-slate-500 tracking-wide text-center max-w-xl mx-auto px-2 break-words leading-relaxed">
               *{programConfig.tagline}
             </p>
           )}
@@ -94,7 +94,8 @@ export const ClientHero: React.FC<ClientHeroProps> = ({
               <span>
                 {isSoldOut
                   ? 'Inscriptions Fermées (Complet)'
-                  : `${isComingSoon ? 'Se Pré-inscrire' : "S'inscrire"} par Orange Money · $${programConfig.ticketPriceUsd.toFixed(2)}`}
+                  : `${isComingSoon ? 'Se Pré-inscrire' : "S'inscrire"} par Orange Money`}
+                {!isSoldOut && <span> · ${programConfig.ticketPriceUsd.toFixed(2)}</span>}
               </span>
               {!isSoldOut && (
                 <ArrowRight className="w-4 h-4 transition-transform group-hover:translate-x-0.5" />
@@ -154,12 +155,12 @@ export const ClientHero: React.FC<ClientHeroProps> = ({
                     <span>{programConfig.locationDisplay || 'PIGA STUDIO TECH HUB'}</span>
                   </div>
                 </div>
-                <div className="flex items-center gap-2.5">
-                  <div className="px-4 py-2 rounded-full bg-white/10 dark:bg-white/10 backdrop-blur-md border border-white/20">
-                    <span className="font-mono text-xs font-bold text-white">{programConfig.dateDisplay}</span>
+                <div className="flex flex-wrap items-center justify-end gap-2 min-w-0">
+                  <div className="px-3 sm:px-4 py-2 rounded-full bg-white/10 dark:bg-white/10 backdrop-blur-md border border-white/20 max-w-full">
+                    <span className="font-mono text-xs font-bold text-white break-words">{programConfig.dateDisplay}</span>
                   </div>
-                  <div className="px-4 py-2 rounded-full bg-[#E50914] backdrop-blur-md shadow-lg shadow-[#E50914]/40">
-                    <span className="font-mono text-xs font-bold text-white">${programConfig.ticketPriceUsd.toFixed(2)} USD</span>
+                  <div className="px-3 sm:px-4 py-2 rounded-full bg-[#E50914] backdrop-blur-md shadow-lg shadow-[#E50914]/40 shrink-0">
+                    <span className="font-mono text-xs font-bold text-white whitespace-nowrap">${programConfig.ticketPriceUsd.toFixed(2)} USD</span>
                   </div>
                 </div>
               </div>

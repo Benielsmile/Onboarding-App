@@ -27,6 +27,22 @@
     transition: background-color 0.2s ease, color 0.2s ease;
   }
 
+  /* ============================================================
+     ANTI-OVERFLOW GLOBAL — Samsung S21 FE → 320px et plus petits
+     Aucun débordement horizontal toléré, côté client comme console
+     admin : les éléments décoratifs amples (rayons lumineux) sont
+     rognés, les longs mots passent à la ligne sans casser le design.
+     ============================================================ */
+  html, body {
+    overflow-x: clip;
+  }
+  img, video, svg, canvas {
+    max-width: 100%;
+  }
+  h1, h2, h3 {
+    overflow-wrap: break-word;
+  }
+
   /* Montserrat: Titles (H1, H2, Corporate Voice) */
   h1, h2, .font-montserrat {
     font-family: 'Montserrat', sans-serif;

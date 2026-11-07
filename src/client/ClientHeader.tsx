@@ -55,10 +55,17 @@ export const ClientHeader: React.FC<ClientHeaderProps> = ({
               : 'bg-white/70 dark:bg-[#0A0A0A]/70 backdrop-blur-md border-transparent px-4 h-[70px]'
           }`}
         >
-          {/* Zone 1: PIGA STUDIO Official Logo */}
-          <div className="flex items-center gap-4 shrink-0">
-            <a href="#top" className="hover:opacity-85 transition-opacity flex items-center">
-              <PigaLogo variant="full" size="md" />
+          {/* Zone 1: PIGA STUDIO Official Logo
+              — très petits écrans : symbole seul (favicon-like)
+              — tablette/desktop : logo wordmark complet */}
+          <div className="flex items-center gap-4 shrink-0 min-w-0">
+            <a href="#top" className="hover:opacity-85 transition-opacity flex items-center" title="PIGA STUDIO" aria-label="PIGA STUDIO">
+              <span className="md:hidden">
+                <PigaLogo variant="symbol-only" size="sm" />
+              </span>
+              <span className="hidden md:flex">
+                <PigaLogo variant="full" size="md" />
+              </span>
             </a>
           </div>
 
@@ -109,9 +116,15 @@ export const ClientHeader: React.FC<ClientHeaderProps> = ({
               {isSoldOut ? (
                 <span>Session Complète</span>
               ) : isComingSoon ? (
-                <span>Pré-inscription · ${price}</span>
+                <>
+                  <span className="sm:hidden">Pre-inscription</span>
+                  <span className="hidden sm:inline">Pré-inscription · ${price}</span>
+                </>
               ) : (
-                <span>Réserver · ${price} USD</span>
+                <>
+                  <span className="sm:hidden">Réserver</span>
+                  <span className="hidden sm:inline">Réserver · ${price} USD</span>
+                </>
               )}
             </button>
 
