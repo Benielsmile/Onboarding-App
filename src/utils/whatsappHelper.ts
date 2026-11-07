@@ -24,6 +24,8 @@ export const PIGA_DIRECTION_WHATSAPP_NUMBER = '+243997406281';
 export const PIGA_DIRECTION_WHATSAPP_URL = 'https://wa.me/243997406281';
 export const PIGA_ORANGE_MONEY_NUMBER = '+243803240289';
 export const PIGA_ORANGE_MONEY_DISPLAY = '+243 803 240 289';
+/** Version du template message WhatsApp (badge de contrôle console admin) */
+export const WHATSAPP_TEMPLATE_VERSION = 'V3-QR-PDF';
 /**
  * Titulaire RÉEL du compte Orange Money récepteur : personne physique
  * (Chargé d'Administration de PIGA STUDIO). L'entité PIGA STUDIO reste

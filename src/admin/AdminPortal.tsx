@@ -57,6 +57,7 @@ import {
   PIGA_DIRECTION_EMAIL,
   PIGA_DIRECTION_PHONE_LOCAL,
   PIGA_ORANGE_MONEY_DISPLAY,
+  WHATSAPP_TEMPLATE_VERSION,
   type FormationMessageInfo
 } from '../utils/whatsappHelper.ts';
 import { 
@@ -101,6 +102,9 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToClient, curren
   const [actionSuccessMessage, setActionSuccessMessage] = useState<string | null>(null);
   // Proof viewer rendering error (blank box guard)
   const [proofImgError, setProofImgError] = useState(false);
+
+  // WhatsApp outgoing message preview (large-print self-check modal)
+  const [whatsappPreview, setWhatsappPreview] = useState<{ url: string; rawMessage: string } | null>(null);
 
   // Post-Workshop: PDF Report Export & Console Wipe (next session preparation)
   const [isWipeModalOpen, setIsWipeModalOpen] = useState(false);
@@ -515,6 +519,9 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToClient, curren
               <span>{resolvedInfo.decorativeName} · Supervision PIGA</span>
               <span className="text-[10px] font-mono text-[#E50914] bg-[#E50914]/10 dark:bg-[#E50914]/15 px-2 py-0.5 rounded font-bold border border-[#E50914]/30">
                 ORANGE MONEY ({resolvedInfo.orangeMoneyNumber})
+              </span>
+              <span className="text-xs font-mono text-[#10B981] bg-[#10B981]/10 px-2.5 py-1 rounded font-bold border-2 border-[#10B981]/40">
+                WhatsApp {WHATSAPP_TEMPLATE_VERSION} — PDF+QR ✅
               </span>
             </h1>
             <div className="text-[11px] text-slate-500 dark:text-slate-400 flex items-center gap-2 mt-0.5">
@@ -1064,16 +1071,17 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToClient, curren
                                       <span>Pass PDF</span>
                                     </button>
 
-                                    <a
-                                      href={generateWhatsAppConfirmationUrl(p, formationInfo).url}
-                                      target="_blank"
-                                      rel="noopener noreferrer"
+                                    <button
+                                      onClick={() => {
+                                        const preview = generateWhatsAppConfirmationUrl(p, formationInfo);
+                                        setWhatsappPreview(preview);
+                                      }}
                                       className="px-2.5 py-1.5 text-xs font-semibold text-[#10B981] bg-[#10B981]/10 hover:bg-[#10B981]/20 border border-[#10B981]/30 rounded transition-colors flex items-center gap-1 cursor-pointer"
-                                      title="Envoyer la confirmation WhatsApp au client"
+                                      title="Aperçu du message de confirmation (PDF + QR) puis envoi WhatsApp"
                                     >
                                       <MessageSquare className="w-3.5 h-3.5" />
                                       <span>WhatsApp</span>
-                                    </a>
+                                    </button>
                                   </>
                                 )}
 
@@ -1446,6 +1454,71 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToClient, curren
                   )}
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ==================================================================== */}
+      {/* MODAL 1b: WHATSAPP CONFIRMATION PREVIEW — GROS CARACTÈRES             */}
+      {/* ==================================================================== */}
+      {whatsappPreview && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md animate-fade-in">
+          <div className="w-full max-w-2xl bg-white dark:bg-[#0A0A0A] border-2 border-[#10B981]/50 rounded-xl overflow-hidden shadow-2xl flex flex-col max-h-[90vh]">
+            <div className="px-5 py-4 border-b border-slate-200 dark:border-[#222222] bg-slate-50 dark:bg-[#0F0F0F] flex items-center justify-between">
+              <div>
+                <h3 className="text-base font-bold font-montserrat text-slate-900 dark:text-white flex items-center gap-2">
+                  <MessageSquare className="w-5 h-5 text-[#10B981]" />
+                  <span>Aperçu WhatsApp — Confirmation au client</span>
+                </h3>
+                <div className="text-sm text-[#10B981] font-bold font-mono mt-1">
+                  Modèle {WHATSAPP_TEMPLATE_VERSION} ✅ — le lien PDF (QR Code inclus) est ci-dessous
+                </div>
+              </div>
+              <button
+                onClick={() => setWhatsappPreview(null)}
+                className="p-1 text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white rounded cursor-pointer"
+              >
+                <X className="w-6 h-6" />
+              </button>
+            </div>
+
+            <div className="p-6 overflow-y-auto space-y-5">
+              {/* Le lien PDF affiché en très gros — vérification visuelle immédiate */}
+              <div className="rounded-lg border-2 border-[#10B981]/40 bg-[#10B981]/5 px-4 py-4 space-y-2">
+                <div className="text-[11px] font-bold font-montserrat uppercase tracking-wider text-[#10B981]">
+                  🎫 Lien de la Facture PDF (contient le QR Code d'accès)
+                </div>
+                <div className="text-lg font-mono font-bold text-slate-900 dark:text-white break-all leading-snug">
+                  {whatsappPreview.rawMessage.match(/https?:\/\/\S+api\/ticket\/\S+/i)?.[0] || '⚠️ Lien PDF ABSENT — modèle obsolète !'}
+                </div>
+              </div>
+
+              {/* Message tel qu'il sera envoyé */}
+              <div>
+                <div className="text-[11px] font-bold font-montserrat uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-2">
+                  Message complet (tel qu'écrit dans WhatsApp)
+                </div>
+                <pre className="whitespace-pre-wrap text-sm text-slate-800 dark:text-slate-200 font-inter bg-slate-50 dark:bg-[#121212] border border-slate-200 dark:border-[#1E1E1E] rounded-lg p-4 leading-relaxed">
+                  {whatsappPreview.rawMessage}
+                </pre>
+              </div>
+            </div>
+
+            <div className="px-6 py-4 border-t border-slate-200 dark:border-[#222222] bg-slate-50 dark:bg-[#0F0F0F] flex flex-col sm:flex-row items-center justify-between gap-3">
+              <button
+                onClick={() => setWhatsappPreview(null)}
+                className="px-5 py-2.5 text-sm font-medium text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white transition-colors cursor-pointer"
+              >
+                Retour
+              </button>
+              <button
+                onClick={() => window.open(whatsappPreview.url, '_blank', 'noopener,noreferrer')}
+                className="px-6 py-3 text-base font-bold font-montserrat text-white bg-[#10B981] hover:bg-[#059669] rounded-lg transition-colors flex items-center gap-2 cursor-pointer shadow-lg shadow-emerald-600/25 w-full sm:w-auto justify-center"
+              >
+                <MessageSquare className="w-5 h-5" />
+                <span>OUVRIR WHATSAPP &amp; ENVOYER AU CLIENT</span>
+              </button>
             </div>
           </div>
         </div>
