@@ -543,16 +543,24 @@ export class NeonStore {
       const randomSuffix = crypto.randomBytes(3).toString('hex').toUpperCase();
       const ticketCode = `AA-2026-${randomSuffix}-${phoneIntl.slice(-3)}`;
 
-      // 6. Preuve de paiement Orange Money (persistée dans la même transaction)
+      // 6. Preuve de paiement Orange Money (persistée dans la même transaction).
+      // req.proofBase64 peut arriver sous forme de data-URL complète
+      // ("data:image/jpeg;base64,....") : décoder le préfixe en base64 brouille
+      // l'alignement et corrompt les octets JPEG à l'affichage. On isole donc
+      // le payload base64 ET le vrai type MIME avant persistance.
       let proofStoragePath = 'proofs/pending_upload.jpg';
       if (req.proofBase64) {
-        proofStoragePath = `proofs/${cfg.id}/${id}.jpg`;
-        const proofBuf = Buffer.from(req.proofBase64, 'base64');
+        const proofMatch = /^data:(image\/(?:jpeg|jpg|png|webp));base64,([A-Za-z0-9+/=]+)$/i.exec(req.proofBase64);
+        const proofBase64 = proofMatch ? proofMatch[2] : req.proofBase64;
+        const proofMime = (proofMatch ? proofMatch[1] : 'image/jpeg').toLowerCase();
+        const proofExt = proofMime === 'image/jpeg' || proofMime === 'image/jpg' ? 'jpg' : proofMime.split('/')[1];
+        proofStoragePath = `proofs/${cfg.id}/${id}.${proofExt}`;
+        const proofBuf = Buffer.from(proofBase64, 'base64');
         await client.query(
           `INSERT INTO public.stored_files (path, mime_type, size_bytes, data)
-           VALUES ($1, 'image/jpeg', $2, $3)
-           ON CONFLICT (path) DO UPDATE SET mime_type = 'image/jpeg', size_bytes = $2, data = $3`,
-          [proofStoragePath, proofBuf.length, proofBuf]
+           VALUES ($1, $2, $3, $4)
+           ON CONFLICT (path) DO UPDATE SET mime_type = $2, size_bytes = $3, data = $4`,
+          [proofStoragePath, proofMime, proofBuf.length, proofBuf]
         );
       }
 

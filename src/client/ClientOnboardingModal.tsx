@@ -7,24 +7,23 @@
  * - Step 1: Profiling & DRC Phone Sanitization (blocks on invalid format)
  * - Step 2: Contrat DNA & IP (PIGA STUDIO Intellectual Property & Non-Disclosure)
  * - Step 3: Paiement Exclusif Orange Money (+243 803 240 289) & Capture d'écran Orange Money
- * - On Submit: Triggers Web Push Notification to Admin PWA and generates official PDF Pass
+ * - On Submit: Triggers Web Push Notification to Admin PWA — NO pass / VIP access is
+ *   delivered here: the PDF invoice & VIP WhatsApp link are sent by the Direction only
+ *   AFTER manual Orange Money verification (WhatsApp confirmation message).
  */
 
 import React, { useState } from 'react';
-import { X, Check, AlertCircle, Upload, ShieldCheck, ArrowRight, ArrowLeft, FileDown, MessageSquare, Copy, CheckCircle2 } from 'lucide-react';
+import { X, Check, AlertCircle, Upload, ShieldCheck, ArrowRight, ArrowLeft, Copy, CheckCircle2, Clock, MessageSquare, FileDown } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { cleanAndValidateDRCPhone } from '../utils/drcPhoneValidator.ts';
 import { api } from '../services/api.ts';
 import { triggerNativePushNotification } from '../utils/pwaNotifications.ts';
-import { 
-  PIGA_ORANGE_MONEY_DISPLAY, 
-  PIGA_ORANGE_MONEY_NUMBER,
-  PIGA_DIRECTION_EMAIL, 
-  PIGA_DIRECTION_PHONE_LOCAL,
-  generateWhatsAppConfirmationUrl
+import {
+  PIGA_ORANGE_MONEY_DISPLAY,
+  PIGA_DIRECTION_EMAIL,
+  PIGA_DIRECTION_PHONE_LOCAL
 } from '../utils/whatsappHelper.ts';
-import { downloadTicketPDF } from '../utils/pdfGenerator.ts';
-import type { RegistrationResponse, Participant, ProgramConfig } from '../types/index.ts';
+import type { RegistrationResponse, ProgramConfig } from '../types/index.ts';
 
 interface ClientOnboardingModalProps {
   programConfig?: ProgramConfig;
@@ -112,7 +111,6 @@ export const ClientOnboardingModal: React.FC<ClientOnboardingModalProps> = ({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submissionError, setSubmissionError] = useState<string | null>(null);
   const [submittedData, setSubmittedData] = useState<RegistrationResponse | null>(null);
-  const [registeredParticipant, setRegisteredParticipant] = useState<Participant | null>(null);
 
   if (!isOpen) return null;
 
@@ -175,30 +173,7 @@ export const ClientOnboardingModal: React.FC<ClientOnboardingModalProps> = ({
         ndaAccepted: true
       });
 
-      // Construct provisional participant object for immediate client PDF / WhatsApp
-      const provisionalParticipant: Participant = {
-        id: response.participantId || crypto.randomUUID(),
-        fullName,
-        email,
-        emailMasked: email.slice(0, 2) + '***@' + email.split('@')[1],
-        phoneRaw: phoneInput,
-        phoneInternational: phoneValidation.formattedInternational,
-        phoneMasked: '+' + phoneValidation.formattedInternational.slice(0, 5) + '***',
-        networkCarrier: phoneValidation.carrier,
-        status: 'PENDING',
-        priceUsd: ticketPrice,
-        paymentProvider: 'ORANGE_MONEY',
-        transactionReference: transactionRef,
-        proofFileName: screenshotName || 'capture_orangemoney.jpg',
-        proofStoragePath: `proofs/2026-11-13/${response.participantId}.jpg`,
-        ndaAccepted: true,
-        ndaAcceptedAt: new Date().toISOString(),
-        createdAt: new Date().toISOString(),
-        ticketCode: response.ticketCode || 'PIGA-AA-2026-PENDING'
-      };
-
       setSubmittedData(response);
-      setRegisteredParticipant(provisionalParticipant);
       setCurrentStep(4);
       onSuccess();
 
@@ -643,7 +618,7 @@ export const ClientOnboardingModal: React.FC<ClientOnboardingModalProps> = ({
                   Inscription Transmise à PIGA STUDIO
                 </h3>
                 <p className="text-xs text-slate-600 dark:text-slate-300 max-w-md mx-auto leading-relaxed">
-                  Votre versement Orange Money de <strong>$20.00 USD</strong> et votre capture ont été transmis au superviseur. 
+                  Votre versement Orange Money et votre capture ont été transmis au superviseur.
                   Une notification automatique vient d'être envoyée sur le terminal d'administration.
                 </p>
               </div>
@@ -672,28 +647,27 @@ export const ClientOnboardingModal: React.FC<ClientOnboardingModalProps> = ({
                 </div>
               </div>
 
-              {/* Action Buttons: PDF Pass & WhatsApp Confirmation */}
-              {registeredParticipant && (
-                <div className="flex flex-col sm:flex-row items-center justify-center gap-3 max-w-md mx-auto pt-2">
-                  <button
-                    onClick={() => downloadTicketPDF(registeredParticipant)}
-                    className="w-full sm:w-auto px-4 py-2.5 text-xs font-bold text-slate-900 dark:text-white bg-slate-100 hover:bg-slate-200 dark:bg-[#1E1E1E] dark:hover:bg-[#2A2A2A] border border-slate-300 dark:border-[#333333] rounded-md transition-colors flex items-center justify-center gap-2 cursor-pointer shadow-xs"
-                  >
-                    <FileDown className="w-4 h-4 text-[#E50914]" />
-                    <span>Télécharger Pass PDF</span>
-                  </button>
-
-                  <a
-                    href={generateWhatsAppConfirmationUrl(registeredParticipant).url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="w-full sm:w-auto px-4 py-2.5 text-xs font-bold text-white bg-[#10B981] hover:bg-[#059669] rounded-md transition-colors flex items-center justify-center gap-2 cursor-pointer shadow-xs"
-                  >
-                    <MessageSquare className="w-4 h-4" />
-                    <span>Ouvrir WhatsApp &amp; VIP</span>
-                  </a>
+              {/* Delivrance conditionnelle : le billet PDF + le lien VIP sont envoyés
+                  par la Direction UNIQUEMENT après vérification du paiement */}
+              <div className="p-4 rounded-lg bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800/50 max-w-md mx-auto text-left text-xs space-y-2.5 shadow-xs">
+                <div className="flex items-center gap-2">
+                  <Clock className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
+                  <span className="font-bold text-amber-700 dark:text-amber-400 font-montserrat text-[11px] uppercase tracking-wider">
+                    Délivrance après vérification
+                  </span>
                 </div>
-              )}
+                <p className="text-slate-700 dark:text-slate-300 leading-relaxed">
+                  Votre laissez-passer <strong>PDF officiel (QR cryptographique)</strong> et le
+                  <strong> lien du groupe WhatsApp VIP</strong> vous seront délivrés <strong>exclusivement après
+                  la vérification manuelle</strong> de votre paiement par la Direction PIGA STUDIO.
+                </p>
+                <p className="text-slate-600 dark:text-slate-400 leading-relaxed flex items-start gap-2">
+                  <MessageSquare className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+                  <span>Vous recevrez un message <strong>WhatsApp de confirmation</strong> accompagné de votre
+                  facture PDF et de votre accès VIP dès validation du transfert Orange Money
+                  vers {PIGA_ORANGE_MONEY_DISPLAY}.</span>
+                </p>
+              </div>
 
               <button
                 onClick={onClose}

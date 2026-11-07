@@ -54,7 +54,7 @@ export function resolveMessageInfo(info?: FormationMessageInfo) {
 }
 
 export function generateWhatsAppConfirmationUrl(
-  participant: Pick<Participant, 'fullName' | 'phoneInternational' | 'ticketCode' | 'cryptoToken' | 'paymentProvider' | 'transactionReference' | 'priceUsd'>,
+  participant: Pick<Participant, 'id' | 'fullName' | 'phoneInternational' | 'ticketCode' | 'cryptoToken' | 'paymentProvider' | 'transactionReference' | 'priceUsd'>,
   info?: FormationMessageInfo,
   siteUrl: string = typeof window !== 'undefined' ? window.location.origin : 'https://arsenal-agentique.tech'
 ): { url: string; rawMessage: string } {
@@ -63,6 +63,8 @@ export function generateWhatsAppConfirmationUrl(
   const verificationLink = participant.cryptoToken 
     ? `${siteUrl}/#verify?token=${encodeURIComponent(participant.cryptoToken)}`
     : `${siteUrl}?ticket=${participant.ticketCode}`;
+  // Facture PDF générée par le serveur : ne répond que si le dossier est CONFIRMED
+  const invoiceUrl = `${siteUrl}/api/ticket/${participant.id}/pdf`;
 
   const rawMessage = [
     `🔴 *PIGA STUDIO — ${msg.decorativeName.toUpperCase()} : ACCÈS CONFIRMÉ*`,
@@ -76,6 +78,9 @@ export function generateWhatsAppConfirmationUrl(
     `🎫 *Code Billet :* \`${participant.ticketCode || 'PIGA-AA-2026'}\``,
     `💳 *Montant réglé :* ${(participant.priceUsd ?? 20).toFixed(2)} USD (Vérifié via Orange Money)`,
     `🔖 *Réf. Orange Money :* \`${participant.transactionReference}\``,
+    ``,
+    `📎 *Votre Facture / Billet PDF Officiel :*`,
+    `${invoiceUrl}`,
     ``,
     `🔐 *Vérification Cryptographique (AES-256-GCM) :*`,
     `${verificationLink}`,

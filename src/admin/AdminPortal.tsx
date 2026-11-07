@@ -99,6 +99,8 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToClient, curren
   const [revocationReason, setRevocationReason] = useState('Preuve Orange Money non identifiable ou transfert non reçu.');
   const [processingId, setProcessingId] = useState<string | null>(null);
   const [actionSuccessMessage, setActionSuccessMessage] = useState<string | null>(null);
+  // Proof viewer rendering error (blank box guard)
+  const [proofImgError, setProofImgError] = useState(false);
 
   // Post-Workshop: PDF Report Export & Console Wipe (next session preparation)
   const [isWipeModalOpen, setIsWipeModalOpen] = useState(false);
@@ -203,7 +205,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToClient, curren
       const updated = await api.confirmPayment(p.id);
       setParticipants(prev => prev.map(item => item.id === updated.id ? updated : item));
       await loadData();
-      setActionSuccessMessage(`Paiement de ${sanitizeSafeText(p.fullName)} confirmé. Billet cryptographique (AES-256-GCM) émis avec succès.`);
+      setActionSuccessMessage(`Paiement de ${sanitizeSafeText(p.fullName)} confirmé. Billet cryptographique (AES-256-GCM) émis. Cliquez ensuite sur « WhatsApp » pour lui envoyer la confirmation officielle — facture PDF + lien VIP inclus dans le message.`);
       setTimeout(() => setActionSuccessMessage(null), 5000);
     } catch (err: unknown) {
       alert(err instanceof Error ? err.message : 'Erreur de confirmation');
@@ -250,6 +252,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToClient, curren
   // 4. Open 5-minute Signed Proof URL
   const handleInspectProof = async (p: Participant) => {
     try {
+      setProofImgError(false);
       const signedUrl = await api.getSignedProofUrl(p.proofStoragePath);
       setViewingProof({
         path: p.proofStoragePath,
@@ -1473,10 +1476,26 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToClient, curren
             </div>
 
             <div className="p-6 overflow-y-auto flex items-center justify-center bg-slate-100 dark:bg-[#000000] min-h-[320px]">
-              {viewingProof.signedUrl ? (
-                <img 
-                  src={viewingProof.signedUrl} 
-                  alt="Preuve Orange Money" 
+              {proofImgError ? (
+                <div className="text-center space-y-3 p-6 rounded-lg bg-red-50 dark:bg-red-950/20 border border-red-300 dark:border-red-900/60 max-w-md">
+                  <AlertOctagon className="w-8 h-8 text-red-500 mx-auto" />
+                  <div className="text-xs font-bold text-red-700 dark:text-red-300 font-montserrat uppercase tracking-wider">
+                    Rendu de la preuve impossible
+                  </div>
+                  <p className="text-[11px] text-slate-600 dark:text-slate-400 font-inter leading-relaxed">
+                    Le fichier stocké n'est pas lisible comme image (dossier enregistré avant la correction du
+                    pipeline de capture, ou capture jamais transmise). Demandez au client une capture lisible
+                    via « Contacter Client » si le dossier est révocable.
+                  </p>
+                  <div className="text-[10px] font-mono text-slate-500 break-all">
+                    {viewingProof.path}
+                  </div>
+                </div>
+              ) : viewingProof.signedUrl ? (
+                <img
+                  src={viewingProof.signedUrl}
+                  alt="Preuve Orange Money"
+                  onError={() => setProofImgError(true)}
                   className="max-h-[60vh] max-w-full rounded border border-slate-300 dark:border-[#222222] object-contain shadow-md"
                 />
               ) : (

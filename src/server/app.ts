@@ -19,6 +19,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { TRAINING_PRESETS } from '../utils/programPresets.ts';
 import type { RegistrationRequest } from '../types/index.ts';
+import { generateTicketPDF } from '../utils/pdfGenerator.ts';
+import type { FormationMessageInfo } from '../utils/whatsappHelper.ts';
 import {
   NeonStore,
   initNeon,
@@ -321,6 +323,52 @@ export async function createPigaApp(options: CreateAppOptions = {}): Promise<Exp
       ...result,
       timestamp: new Date().toISOString()
     });
+  });
+
+  // 5b. Public Ticket Invoice PDF — link sent to the client INSIDE the WhatsApp
+  // confirmation message, AFTER the Direction has manually confirmed the Orange
+  // Money payment. Protected by the unguessable participant UUID and delivered
+  // for CONFIRMED registrations only (PENDING members must not obtain a pass).
+  app.get('/api/ticket/:participantId/pdf', async (req: Request, res: Response) => {
+    try {
+      const participant = await store.getParticipantById(String(req.params.participantId));
+      if (!participant || participant.status !== 'CONFIRMED') {
+        return res.status(404).json({
+          error: 'Billet introuvable ou dossier non confirmé. Votre laissez-passer sera délivré après vérification du paiement par la Direction PIGA STUDIO.'
+        });
+      }
+
+      // Formation info from the participant's program config (server-safe defaults)
+      const cfg = await store.getProgramConfig();
+      const info: FormationMessageInfo = {
+        title: cfg.title,
+        tagline: cfg.tagline,
+        dateDisplay: cfg.dateDisplay,
+        timeDisplay: cfg.timeDisplay,
+        locationDisplay: cfg.locationDisplay,
+        orangeMoneyNumber: cfg.orangeMoneyNumber,
+        orangeMoneyHolder: cfg.orangeMoneyHolder,
+        directionEmail: cfg.directionEmail,
+        directionPhone: cfg.directionPhone,
+        vipWhatsAppUrl: cfg.vipWhatsAppUrl,
+        moduleSummaries: cfg.modules.slice(0, 4).map(m => `• ${m.title}${m.highlight ? ` — ${m.highlight}` : ''}`)
+      };
+
+      const proto = (req.headers['x-forwarded-proto'] as string) || 'https';
+      const host = (req.headers['x-forwarded-host'] as string) || (req.headers.host as string) || 'arsenal-agentique.tech';
+      const siteUrl = `${proto}://${host}`;
+
+      const doc = await generateTicketPDF(participant, info, siteUrl);
+      const buffer = Buffer.from(doc.output('arraybuffer'));
+
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `inline; filename="Billet_PIGA_STUDIO_${(participant.ticketCode || participant.id).replace(/[^a-zA-Z0-9-]/g, '')}.pdf"`);
+      res.setHeader('Cache-Control', 'no-store');
+      return res.send(buffer);
+    } catch (err) {
+      console.error('[TICKET PDF ERROR]:', err);
+      return res.status(500).json({ error: 'Échec de génération du billet PDF officiel.' });
+    }
   });
 
   // 6. Admin Authentication (Owner-only: hardcoded PIGA STUDIO Direction identity)
