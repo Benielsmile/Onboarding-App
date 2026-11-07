@@ -1023,21 +1023,48 @@ export class NeonStore {
       const partRes = await client.query('DELETE FROM public.participants');
       const deletedParticipants = partRes.rowCount ?? 0;
       const deletedProofs = proofRes.rowCount ?? 0;
-      await client.query(
-        `INSERT INTO public.audit_logs (id, admin_id, action_type, timestamp, user_agent, ip_address, metadata)
-         VALUES ($1, $2, 'RESET_WORKSHOP_DATA', now(), $3, $4, $5::jsonb)`,
-        [
-          crypto.randomUUID(),
-          adminId,
-          userAgent,
-          clientIp,
-          JSON.stringify({
-            deletedParticipants,
-            deletedProofs,
-            note: 'Nettoyage post-atelier : billetterie réinitialisée pour la prochaine session'
-          })
-        ]
-      );
+
+      // Journal d'audit immuable — protégé par SAVEPOINT : une enum de type
+      // non migrée (BASE_NOT_MIGRATED) ne doit JAMAIS faire échouer le wipe.
+      try {
+        await client.query('SAVEPOINT wipe_audit');
+        await client.query(
+          `INSERT INTO public.audit_logs (id, admin_id, action_type, timestamp, user_agent, ip_address, metadata)
+           VALUES ($1, $2, 'RESET_WORKSHOP_DATA', now(), $3, $4, $5::jsonb)`,
+          [
+            crypto.randomUUID(),
+            adminId,
+            userAgent,
+            clientIp,
+            JSON.stringify({
+              deletedParticipants,
+              deletedProofs,
+              note: 'Nettoyage post-atelier : billetterie réinitialisée pour la prochaine session'
+            })
+          ]
+        );
+        await client.query('RELEASE SAVEPOINT wipe_audit');
+      } catch (auditErr) {
+        await client.query('ROLLBACK TO SAVEPOINT wipe_audit').catch(() => {});
+        console.warn('[WIPE AUDIT FALLBACK] RESET_WORKSHOP_DATA refusé par la base, repli sur ADMIN_LOGIN :', auditErr);
+        await client.query(
+          `INSERT INTO public.audit_logs (id, admin_id, action_type, timestamp, user_agent, ip_address, metadata)
+           VALUES ($1, $2, 'ADMIN_LOGIN', now(), $3, $4, $5::jsonb)`,
+          [
+            crypto.randomUUID(),
+            adminId,
+            userAgent,
+            clientIp,
+            JSON.stringify({
+              deletedParticipants,
+              deletedProofs,
+              fallbackFrom: 'RESET_WORKSHOP_DATA',
+              note: 'Nettoyage post-atelier (journal en repli) : billetterie réinitialisée pour la prochaine session'
+            })
+          ]
+        );
+      }
+
       await client.query('COMMIT');
       console.log(`[WIPE] Post-atelier : ${deletedParticipants} inscription(s) et ${deletedProofs} preuve(s) supprimées par ${adminId}.`);
       return { deletedParticipants, deletedProofs };
