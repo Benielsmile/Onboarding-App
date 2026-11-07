@@ -14,6 +14,7 @@
  */
 
 import React, { useState, useEffect, useRef } from 'react';
+import jsQR from 'jsqr';
 import { 
   ShieldCheck, 
   Check, 
@@ -130,6 +131,8 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToClient, curren
   const [scannerFrameCount, setScannerFrameCount] = useState(0);
   const [scannerLastError, setScannerLastError] = useState<string | null>(null);
   const [hasNativeQrEngine, setHasNativeQrEngine] = useState<boolean | null>(null);
+  const [firstFrameSeen, setFirstFrameSeen] = useState(false);
+  const [backupEngineActive, setBackupEngineActive] = useState(false);
 
   // PWA & Notification Status
   const { isInstallable, install } = usePWAInstall();
@@ -450,6 +453,8 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToClient, curren
     setScannerFrameCount(0);
     setScannerLastError(null);
     setHasNativeQrEngine(null);
+    setFirstFrameSeen(false);
+    setBackupEngineActive(false);
 
     const timer = setTimeout(() => {
       void (async () => {
@@ -493,13 +498,32 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToClient, curren
         videoEl.srcObject = stream;
         try { await videoEl.play(); } catch { /* autoplay bloqué — le flux reste attaché, un léger tap sur la vignette relance l'image */ }
 
+        // confirmation live du rendu de la caméra (détecte les frames figées)
+        const markPlaying = (): void => setFirstFrameSeen(true);
+        videoEl.addEventListener('playing', markPlaying, { once: true });
+
         // --- Boucle de décodage manuelle (130ms) : robuste et inspectable ---
         let frameCount = 0;
+        // Canvas industriel : CHAQUE frame est dessinée à pleine résolution puis
+        // analysée — plus aucun échec silencieux de la lecture <video>.
+        const workCanvas = document.createElement('canvas');
+        const workCtx = workCanvas.getContext('2d', { willReadFrequently: true });
+
         scanTimerRef.current = window.setInterval(() => {
-          if (scanBusyRef.current) return; // un tick non fini → on saute
-          if (videoEl.readyState < 2) return; // vidéo pas prête
+          if (scanBusyRef.current) return;
+          if (!videoEl.videoWidth || videoEl.readyState < 2) {
+            setScannerLastError('Image caméra pas encore prête — taper la vignette / autorisez la caméra.');
+            return;
+          }
           scanBusyRef.current = true;
-          detector.detect(videoEl)
+          // Redimensionne le pas trop grand pour garder la vitesse : longueur ≤ 640
+          const scale = Math.min(1, 640 / Math.max(videoEl.videoWidth, videoEl.videoHeight));
+          const cw = Math.max(1, Math.round(videoEl.videoWidth * scale));
+          const ch = Math.max(1, Math.round(videoEl.videoHeight * scale));
+          if (workCanvas.width !== cw || workCanvas.height !== ch) { workCanvas.width = cw; workCanvas.height = ch; }
+          try { workCtx?.drawImage(videoEl, 0, 0, cw, ch); } catch { /* frame en cours */ }
+
+          detector.detect(workCanvas)
             .then(codes => {
               frameCount += 1;
               if (frameCount % 10 === 1) setScannerFrameCount(frameCount);
@@ -512,6 +536,9 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToClient, curren
                 verifyTokenString(value);
                 stopCameraScanner();
                 setIsCameraScannerActive(false);
+              } else if (frameCount === 38) {
+                // ~5 s sans lecture native → moteur JS de secours intégré à la même boucle
+                setBackupEngineActive(true);
               }
             })
             .catch((e: unknown) => {
@@ -523,6 +550,23 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToClient, curren
               }
             })
             .finally(() => { scanBusyRef.current = false; });
+
+          // === MOTEUR DE SECOURS jsQR (remotely, same canvas) — actif après 5s natifs vides
+          if (frameCount >= 38 && workCtx) {
+            try {
+              const img = workCtx.getImageData(0, 0, cw, ch);
+              const qr = jsQR(img.data, img.width, img.height, { inversionAttempts: 'dontInvert' });
+              if (qr && qr.data && qr.data.trim()) {
+                const value = qr.data.trim();
+                clearInterval(scanTimerRef.current ?? 0);
+                scanTimerRef.current = null;
+                setScannerTokenInput(value);
+                verifyTokenString(value);
+                stopCameraScanner();
+                setIsCameraScannerActive(false);
+              }
+            } catch { /* moteur de secours — erreurs tolérées */ }
+          }
         }, 130);
       })();
     }, 250);
@@ -1316,13 +1360,18 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToClient, curren
                     className="w-full min-h-[280px] aspect-video overflow-hidden rounded bg-black object-cover"
                   />
                   {/* Diagnostics live — la boucle tourne-t-elle ? */}
-                  <div className="mt-2 rounded-md border-2 border-[#10B981]/50 bg-[#10B981]/10 px-3 py-2">
+                  <div className="mt-2 rounded-md border-2 border-[#10B981]/50 bg-[#10B981]/10 px-3 py-2 space-y-1">
                     <div className="text-sm font-bold font-mono text-[#10B981]">
                       🔍 Recherche active… {scannerFrameCount} image(s) analysée(s)
                       {hasNativeQrEngine === true && <span className="ml-1 text-[10px] text-[#059669]">moteur QR natif ✅</span>}
+                      {hasNativeQrEngine === false && <span className="ml-1 text-[10px] text-slate-400">natif absent</span>}
+                      {backupEngineActive && <span className="ml-1 text-[10px] text-amber-400">moteur de secours jsQR actif</span>}
+                    </div>
+                    <div className={`text-[11px] font-semibold ${firstFrameSeen ? 'text-[#10B981]' : 'text-amber-300'}`}>
+                      {firstFrameSeen ? '🎥 Vue caméra en direct ✅' : '⏸ Image caméra pas encore démarrée — tapez légèrement la vignette si elle reste noire'}
                     </div>
                     {scannerLastError && (
-                      <div className="text-[11px] font-semibold text-amber-300 mt-1 break-all">{scannerLastError}</div>
+                      <div className="text-[11px] font-semibold text-amber-300 break-all">{scannerLastError}</div>
                     )}
                   </div>
                   <div className="text-xs font-semibold text-slate-200 mt-2">
