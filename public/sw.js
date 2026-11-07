@@ -2,7 +2,7 @@
  * PIGA STUDIO — Service Worker & Web Push Notification Handler
  */
 
-const CACHE_NAME = 'piga-arsenal-v1';
+const CACHE_NAME = 'piga-arsenal-v2'; // v2 : set d'icônes régénéré depuis le logo PIGA officiel
 const STATIC_ASSETS = [
   '/',
   '/index.html',
