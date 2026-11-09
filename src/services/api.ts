@@ -116,7 +116,8 @@ export const api = {
    */
   async getSignedProofUrl(storagePath: string): Promise<string> {
     try {
-      const res = await fetch(`/api/proof-signed-url?path=${encodeURIComponent(storagePath)}`);
+      // 🔒 (pentest F-03) /api/proof-signed-url exige désormais la session admin
+      const res = await this._adminFetch(`/api/proof-signed-url?path=${encodeURIComponent(storagePath)}`);
       if (!res.ok) throw new Error('Impossible de générer le lien sécurisé');
       const data = await res.json();
       return data.signedUrl;

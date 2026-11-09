@@ -1966,7 +1966,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToClient, curren
                   <span>Justificatif Orange Money · {viewingProof.name}</span>
                 </h3>
                 <div className="text-[11px] text-amber-600 dark:text-amber-400 font-mono mt-0.5">
-                  Lien cryptographiquement signé (HMAC-SHA256) · Auto-expiration : 5 minutes
+                  Lien cryptographiquement signé (HMAC-SHA256) · Auto-expiration : 60 secondes
                 </div>
               </div>
               <button 

@@ -35,7 +35,55 @@ import {
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+// ============================================================================
+// RATE LIMITING — fenêtre glissante en mémoire (par instance).
+// Sous Vercel serverless, complément UVIDER : Vercel Firewall (voir
+// SECURITY-PENTEST-REPORT §Remédiation). Sans new dependency.
+// Conception : cap anti-brute-force + anti-bot SANS bloquer un cybercafé
+// derrière un NAT partagé (Kinshasa) — les seuils sont généreux mais meurtriers
+// pour les machines.
+// ============================================================================
+type RateBucket = { hits: number[] };
+const RATE_BUCKETS = new Map<string, RateBucket>();
+
+function rateLimit(key: string, windowMs: number, maxHits: number): { ok: boolean; retryAfterSec: number } {
+  const now = Date.now();
+  const bucket = RATE_BUCKETS.get(key) ?? { hits: [] };
+  bucket.hits = bucket.hits.filter(t => now - t < windowMs);
+  if (bucket.hits.length >= maxHits) {
+    RATE_BUCKETS.set(key, bucket);
+    const oldestHit = bucket.hits[0];
+    return { ok: false, retryAfterSec: Math.max(1, Math.ceil((windowMs - (now - oldestHit)) / 1000)) };
+  }
+  bucket.hits.push(now);
+  RATE_BUCKETS.set(key, bucket);
+  if (RATE_BUCKETS.size > 10_000) {
+    for (const [k, b] of RATE_BUCKETS) {
+      if (!b.hits.length || now - b.hits[b.hits.length - 1] > 3 * windowMs) RATE_BUCKETS.delete(k);
+    }
+  }
+  return { ok: true, retryAfterSec: 0 };
+}
+
+/** Alerte brute-force : ≥ 6 échecs de login / 15 min / IP => alarme claire console+audit */
+function recordLoginFailure(ip: string): void {
+  const limit = rateLimit(`brute:${ip}`, 15 * 60_000, 6);
+  if (!limit.ok) {
+    console.error(`[🚨 ALERTE BRUTE-FORCE] ${ip} a dépassé 6 échecs de connexion admin en 15 minutes. Blocage en cours — vérifiez les audit-logs et changez le mot de passe si légitime.`);
+    void store.addAuditLog({
+      id: crypto.randomUUID(),
+      adminId: 'RATE_LIMITER',
+      actionType: 'ADMIN_LOGIN',
+      timestamp: new Date().toISOString(),
+      userAgent: 'RateLimiter/1.0',
+      ipAddress: ip,
+      details: { status: 'ALARM', reason: 'Brute-force pattern: 6+ failed admin logins / 15min' }
+    }).catch(() => { /* audit best-effort */ });
+  }
+}
+
 const MASTER_SECRET = getMasterSecret();
+
 
 /** Idempotent Neon boot marker shared across Vercel lambda warm starts */
 const NEON_READY_KEY = '__piga_neon_ready__';
@@ -130,14 +178,32 @@ export async function createPigaApp(options: CreateAppOptions = {}): Promise<Exp
   const app = express();
 
   // Parsing & Security Middlewares
-  app.use(express.json({ limit: '20mb' }));
-  app.use(express.urlencoded({ extended: true, limit: '20mb' }));
+  app.use(express.json({ limit: '12mb' }));
+  app.use(express.urlencoded({ extended: true, limit: '12mb' }));
 
-  // Request audit extractor
+  // Request audit extractor + security headers (pentest F-07)
   app.use((req, res, next) => {
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('X-Frame-Options', 'SAMEORIGIN');
     res.setHeader('X-XSS-Protection', '1; mode=block');
+    // CSP pragmatique : assets self, images data:/blob:/https:, inline styles/scripts
+    // (necessaires au splash statique index.html) — à raffermir si on supprime le splash inline.
+    res.setHeader('Content-Security-Policy', [
+      "default-src 'self'",
+      "img-src 'self' data: blob: https:",
+      "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+      "font-src 'self' https://fonts.gstatic.com data:",
+      "script-src 'self' 'unsafe-inline'",
+      "connect-src 'self' wss:",
+      "frame-ancestors 'self'",
+      "base-uri 'self'",
+      "object-src 'none'"
+    ].join('; '));
+    res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+    res.setHeader('Permissions-Policy', 'camera=(self), microphone=(), geolocation=()');
+    if (req.secure || req.headers['x-forwarded-proto'] === 'https') {
+      res.setHeader('Strict-Transport-Security', 'max-age=63072000; includeSubDomains');
+    }
     next();
   });
 
@@ -214,6 +280,17 @@ export async function createPigaApp(options: CreateAppOptions = {}): Promise<Exp
       const clientIp = safelyGetClientIp(req);
       const userAgent = req.headers['user-agent'] || 'Unknown-Client';
 
+      // 🔒 RATE LIMIT (pentest F-04) : 8 inscriptions / heure / IP — suffisant
+      //    pour une équipe derrière un NAT (cybercafé), mortel pour un bot-farmer.
+      const regLimit = rateLimit(`reg:${clientIp}`, 3_600_000, 8);
+      if (!regLimit.ok) {
+        res.setHeader('Retry-After', String(regLimit.retryAfterSec));
+        return res.status(429).json({
+          success: false,
+          message: `Trop d'inscriptions depuis ce réseau. Réessayez dans environ ${Math.ceil(regLimit.retryAfterSec / 60)} minute(s) ou contactez la Direction PIGA STUDIO.`
+        });
+      }
+
       const participant = await store.registerParticipantAtomic(req.body as RegistrationRequest, clientIp, userAgent);
 
       return res.status(201).json({
@@ -251,15 +328,19 @@ export async function createPigaApp(options: CreateAppOptions = {}): Promise<Exp
     }
   });
 
-  // 3. Cryptographic Signed URL Generation for Proof Reads (5-minute expiration)
-  app.get('/api/proof-signed-url', (req: Request, res: Response) => {
+  // 3. Cryptographic Signed URL Generation for Proof Reads
+  // 🔒 SÉCURITÉ (pentest F-03) : signé STRICTEMENT derrière la session admin —
+  //    plus de service de signature public. TTL ramené 5 min → 60 s.
+  app.get('/api/proof-signed-url', (req: Request, res: Response, next: NextFunction) => {
+    void requireAdminSession(req, res, next);
+  }, (req: Request, res: Response) => {
     try {
       const storagePath = req.query.path as string;
       if (!storagePath) {
         return res.status(400).json({ error: 'Chemin de stockage manquant.' });
       }
 
-      const expiresAt = Date.now() + 5 * 60 * 1000; // 5 minutes
+      const expiresAt = Date.now() + 60 * 1000; // ⏱ 60 secondes (pentest F-03)
       const dataToSign = `${storagePath}:${expiresAt}`;
       const sig = crypto.createHmac('sha256', MASTER_SECRET).update(dataToSign).digest('hex');
 
@@ -371,15 +452,32 @@ export async function createPigaApp(options: CreateAppOptions = {}): Promise<Exp
     }
   });
 
-  // 6. Admin Authentication (Owner-only: hardcoded PIGA STUDIO Direction identity)
+  // 6. Admin Authentication (Owner-only: env-driven identity)
   app.post('/api/admin/auth', async (req: Request, res: Response) => {
     const { email, password } = req.body || {};
     const clientIp = safelyGetClientIp(req);
     const userAgent = req.headers['user-agent'] || 'Unknown-Client';
 
+    // 🔒 RATE LIMIT (pentest F-02) : 5 tentatives / minute / IP sur le login
+    const loginLimit = rateLimit(`login:${clientIp}`, 60_000, 5);
+    if (!loginLimit.ok) {
+      void store.addAuditLog({
+        id: crypto.randomUUID(),
+        adminId: 'RATE_LIMITER',
+        actionType: 'ADMIN_LOGIN',
+        timestamp: new Date().toISOString(),
+        userAgent,
+        ipAddress: clientIp,
+        details: { status: 'RATE_LIMITED', retryAfterSec: loginLimit.retryAfterSec }
+      }).catch(() => {});
+      res.setHeader('Retry-After', String(loginLimit.retryAfterSec));
+      return res.status(429).json({ success: false, message: `Trop de tentatives de connexion. Réessayez dans ${loginLimit.retryAfterSec} secondes.` });
+    }
+
     const isValid = verifyAdminCredentials(String(email ?? ''), String(password ?? ''));
 
     if (!isValid) {
+      recordLoginFailure(clientIp);
       void store.addAuditLog({
         id: crypto.randomUUID(),
         adminId: 'UNAUTHORIZED_ATTEMPT',
@@ -656,6 +754,20 @@ export async function createPigaApp(options: CreateAppOptions = {}): Promise<Exp
       console.error('[UPLOAD READ ERROR]:', err);
       return res.status(500).send('Erreur lors de la lecture du fichier.');
     }
+  });
+
+  // --------------------------------------------------------------------------
+  // CATCH-ALL ERROR HANDLER (pentest F-06) : URIError et toutes erreurs
+  // non-gérées remontent en 400 JSON propre — jamais une 500 qui fuite.
+  // --------------------------------------------------------------------------
+  app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
+    const isClientError = err instanceof URIError || (err instanceof Error && err.message?.includes('Failed to decode param'));
+    console.error('[API ERROR HANDLER]:', isClientError ? 'Malformed request URL' : err);
+    if (res.headersSent) return;
+    return res.status(isClientError ? 400 : 500).json({
+      success: false,
+      message: isClientError ? 'Requête invalide.' : 'Erreur interne. Réessayez ou contactez la Direction PIGA STUDIO.'
+    });
   });
 
   // --------------------------------------------------------------------------
