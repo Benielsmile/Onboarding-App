@@ -12,6 +12,7 @@ import { ClientHero } from './client/ClientHero.tsx';
 import { ClientCurriculum } from './client/ClientCurriculum.tsx';
 import { ClientOnboardingModal } from './client/ClientOnboardingModal.tsx';
 import { ClientFooter } from './client/ClientFooter.tsx';
+import { AmbassadorPortal } from './client/AmbassadorPortal.tsx';
 import { AdminPortal } from './admin/AdminPortal.tsx';
 import { ThemeProvider } from './context/ThemeContext.tsx';
 import { api } from './services/api.ts';
@@ -20,10 +21,20 @@ import { registerPwaServiceWorker } from './utils/pwaNotifications.ts';
 import { DEFAULT_PROGRAM_CONFIG } from './utils/programPresets.ts';
 import type { InventoryStatus, ProgramConfig } from './types/index.ts';
 
+/** Parse les paramètres d'un hash de type `#ambassadeur?ref=AMB-XXXX` */
+function parseHashQuery(hash: string): URLSearchParams {
+  const qIndex = hash.indexOf('?');
+  return new URLSearchParams(qIndex >= 0 ? hash.slice(qIndex + 1) : '');
+}
+
 function AppContent() {
   const [isAdminView, setIsAdminView] = useState(false);
+  const [isAmbassadorView, setIsAmbassadorView] = useState(false);
   const [isOnboardingOpen, setIsOnboardingOpen] = useState(false);
   const [isBooting, setIsBooting] = useState(true);
+
+  // Code d'affiliation capturé depuis ?ref=AMB-XXXX (persiste la session du modal)
+  const [ambassadorRef, setAmbassadorRef] = useState<string | null>(() => sessionStorage.getItem('piga_ref'));
 
   // Dynamic Formation Configuration managed by Admin Dashboard
   const [programConfig, setProgramConfig] = useState<ProgramConfig>(DEFAULT_PROGRAM_CONFIG);
@@ -41,7 +52,7 @@ function AppContent() {
     registerPwaServiceWorker();
   }, []);
 
-  // Sync route and hash for Admin vs Client
+  // Sync route and hash for Admin / Ambassador / Client + capture ?ref=
   useEffect(() => {
     const handleLocationChange = () => {
       const hash = window.location.hash;
@@ -49,8 +60,29 @@ function AppContent() {
 
       if (hash.startsWith('#admin') || path.startsWith('/admin')) {
         setIsAdminView(true);
-      } else {
-        setIsAdminView(false);
+        setIsAmbassadorView(false);
+        return;
+      }
+      setIsAdminView(false);
+
+      if (hash.startsWith('#ambassadeur')) {
+        setIsAmbassadorView(true);
+        return;
+      }
+      setIsAmbassadorView(false);
+
+      // Capture du lien magique ambassadeur : ?ref=AMB-XXXX (search ou hash-query)
+      const ref =
+        new URLSearchParams(window.location.search).get('ref') ||
+        parseHashQuery(hash).get('ref');
+      if (ref && /^[A-Za-z0-9_-]{3,32}$/.test(ref)) {
+        sessionStorage.setItem('piga_ref', ref);
+        setAmbassadorRef(ref);
+        const trackKey = `piga_ref_tracked_${ref}`;
+        if (!sessionStorage.getItem(trackKey)) {
+          sessionStorage.setItem(trackKey, '1');
+          void api.trackAmbassadorClick(ref);
+        }
       }
     };
 
@@ -118,6 +150,18 @@ function AppContent() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
+  const openAmbassador = () => {
+    setIsAmbassadorView(true);
+    window.history.pushState(null, '', '#ambassadeur');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const closeAmbassador = () => {
+    setIsAmbassadorView(false);
+    window.history.pushState(null, '', '/');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
   // Called when Admin edits the formation or loads a preset
   const handleProgramConfigUpdated = (newConfig: ProgramConfig) => {
     setProgramConfig(newConfig);
@@ -133,6 +177,12 @@ function AppContent() {
           onBackToClient={closeAdmin} 
           currentConfig={programConfig}
           onConfigUpdated={handleProgramConfigUpdated}
+        />
+      ) : isAmbassadorView ? (
+        // Espace Ambassadeur PIGA STUDIO (recrutement public + tableau de bord)
+        <AmbassadorPortal
+          onBackToClient={closeAmbassador}
+          initialRef={ambassadorRef}
         />
       ) : (
         // Public Dynamic Client Application
@@ -160,6 +210,7 @@ function AppContent() {
           <ClientOnboardingModal
             programConfig={programConfig}
             isOpen={isOnboardingOpen}
+            refCode={ambassadorRef ?? undefined}
             onClose={() => setIsOnboardingOpen(false)}
             onSuccess={() => {
               refreshAllData();
@@ -170,6 +221,7 @@ function AppContent() {
             programConfig={programConfig}
             onOpenAdmin={openAdmin}
             onOpenRegister={() => setIsOnboardingOpen(true)}
+            onOpenAmbassador={openAmbassador}
           />
         </>
       )}

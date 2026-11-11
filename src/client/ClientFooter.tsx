@@ -10,7 +10,7 @@
 import React from 'react';
 import { PigaLogo } from '../components/PigaLogo.tsx';
 import { ThemeToggle } from '../components/ThemeToggle.tsx';
-import { Lock, Mail, Phone, ShieldCheck } from 'lucide-react';
+import { Lock, Mail, Phone, ShieldCheck, Megaphone } from 'lucide-react';
 import type { ProgramConfig } from '../types/index.ts';
 import { directionWhatsAppLink } from '../utils/whatsappHelper.ts';
 
@@ -18,12 +18,14 @@ interface ClientFooterProps {
   programConfig?: ProgramConfig;
   onOpenAdmin: () => void;
   onOpenRegister: () => void;
+  onOpenAmbassador: () => void;
 }
 
 export const ClientFooter: React.FC<ClientFooterProps> = ({
   programConfig,
   onOpenAdmin,
-  onOpenRegister
+  onOpenRegister,
+  onOpenAmbassador
 }) => {
   const price = programConfig?.ticketPriceUsd ?? 20;
   const tagline = programConfig?.tagline || 'L’intelligence logicielle. L’impact cinématographique.';
@@ -77,6 +79,15 @@ export const ClientFooter: React.FC<ClientFooterProps> = ({
                   className="hover:text-[#E50914] transition-colors cursor-pointer text-left"
                 >
                   Inscription &amp; Contrat DNA / IP
+                </button>
+              </li>
+              <li>
+                <button
+                  onClick={onOpenAmbassador}
+                  className="hover:text-[#E50914] transition-colors cursor-pointer text-left flex items-center gap-1.5"
+                >
+                  <Megaphone className="w-3 h-3 text-[#E50914]" />
+                  <span>Devenir Ambassadeur (15% / vente)</span>
                 </button>
               </li>
               <li>

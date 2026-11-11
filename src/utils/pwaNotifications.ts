@@ -40,6 +40,95 @@ export async function requestNotificationPermission(): Promise<NotificationPermi
   }
 }
 
+// ============================================================================
+// PUSH SERVEUR (W3C Web Push / VAPID) — abonnement d'un terminal
+// ============================================================================
+function urlBase64ToUint8Array(base64String: string): Uint8Array {
+  const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const raw = window.atob(base64);
+  const output = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i++) output[i] = raw.charCodeAt(i);
+  return output;
+}
+
+/**
+ * Demande la permission puis enregistre le terminal sur le serveur push.
+ * audience 'ADMIN' = Direction (session zéro-trust exigée côté serveur),
+ * audience 'AMBASSADEUR' = alertes ventes temps réel du lien magique.
+ */
+export async function subscribeWebPush(
+  audience: 'ADMIN' | 'AMBASSADOR',
+  ambassadorCode?: string
+): Promise<{ ok: boolean; message: string }> {
+  if (typeof window === 'undefined' || !('serviceWorker' in navigator) || !('PushManager' in window)) {
+    return { ok: false, message: 'Notifications push non supportées sur cet appareil.' };
+  }
+
+  try {
+    const keyRes = await fetch('/api/push/public-key');
+    const keyData = await keyRes.json();
+    if (!keyData.enabled || !keyData.publicKey) {
+      return { ok: false, message: 'Notifications push non configurées (clés VAPID manquantes côté serveur).' };
+    }
+
+    const perm = await requestNotificationPermission();
+    if (perm !== 'granted') {
+      return { ok: false, message: 'Permission de notification refusée par l\'appareil.' };
+    }
+
+    const reg = await navigator.serviceWorker.ready;
+    const existing = await reg.pushManager.getSubscription();
+    const subscription = existing ?? await reg.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: urlBase64ToUint8Array(keyData.publicKey) as BufferSource
+    });
+
+    const json = subscription.toJSON() as { endpoint?: string; keys?: { p256dh?: string; auth?: string } };
+    if (!json.endpoint || !json.keys?.p256dh || !json.keys?.auth) {
+      return { ok: false, message: 'Abonnement push incomplet.' };
+    }
+
+    const res = await fetch('/api/push/subscribe', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        endpoint: json.endpoint,
+        keys: { p256dh: json.keys.p256dh, auth: json.keys.auth },
+        audience,
+        ambassadorCode
+      })
+    });
+    const data = await res.json();
+    if (!res.ok || !data.success) {
+      return { ok: false, message: data.message || 'Échec de l\'enregistrement push sur le serveur.' };
+    }
+    return { ok: true, message: audience === 'ADMIN' ? 'Terminal Direction inscrit — alertes paiements actives.' : 'Alertes ventes temps réel activées !' };
+  } catch (err) {
+    console.error('[PIGA PUSH SUBSCRIBE ERROR]:', err);
+    return { ok: false, message: 'Erreur lors de l\'activation des notifications push.' };
+  }
+}
+
+/** Désinscrit le terminal du service push serveur */
+export async function unsubscribeWebPush(): Promise<void> {
+  if (typeof window === 'undefined' || !('serviceWorker' in navigator) || !('PushManager' in window)) return;
+  try {
+    const reg = await navigator.serviceWorker.ready;
+    const subscription = await reg.pushManager.getSubscription();
+    if (subscription) {
+      await fetch('/api/push/unsubscribe', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ endpoint: subscription.endpoint })
+      }).catch(() => {});
+      await subscription.unsubscribe().catch(() => {});
+    }
+  } catch {
+    // Silencieux
+  }
+}
+
 export async function triggerNativePushNotification(title: string, body: string, data?: Record<string, unknown>) {
   if (typeof window === 'undefined') return;
 

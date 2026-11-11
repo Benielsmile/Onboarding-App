@@ -15,7 +15,12 @@ import type {
   CryptographicTokenVerification,
   ProgramConfig,
   FormationRegistryState,
-  AdminStats
+  AdminStats,
+  Ambassador,
+  AmbassadorPortalView,
+  AmbassadorRegistrationResponse,
+  AmbassadorSalesEntry,
+  AmbassadorSummary
 } from '../types/index.ts';
 import { decryptAndVerifyTicketToken } from '../utils/cryptoSecurity.ts';
 import { DEFAULT_PROGRAM_CONFIG } from '../utils/programPresets.ts';
@@ -225,6 +230,113 @@ export const api = {
     const data = await res.json();
     if (!res.ok || !data.success) {
       throw new Error(data.message || 'Échec du nettoyage de la console.');
+    }
+    return data;
+  },
+
+  // ==================================================================
+  // AMBASSADEURS PIGA STUDIO (armée de distribution — 15% / vente)
+  // ==================================================================
+
+  /** Candidature publique : génère le code + le lien magique officiel */
+  async registerAmbassador(fullName: string, email: string, phone: string, termsAccepted: boolean = true): Promise<AmbassadorRegistrationResponse> {
+    try {
+      const res = await fetch('/api/ambassador/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fullName: sanitizeSafeText(fullName), email, phone, termsAccepted })
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        return { success: false, message: data.message || 'Échec de la candidature.' };
+      }
+      return data as AmbassadorRegistrationResponse;
+    } catch {
+      return { success: false, message: 'Erreur de communication avec le serveur.' };
+    }
+  },
+
+  /** Ping de tracking du lien magique (dédupliqué serveur jour + IP) */
+  async trackAmbassadorClick(code: string): Promise<void> {
+    try {
+      await fetch(`/api/ambassador/${encodeURIComponent(code)}/click`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({})
+      });
+    } catch {
+      // Tracking silencieux : ne jamais bloquer la navigation
+    }
+  },
+
+  /** Tableau de bord public de l'ambassadeur (lien magique) */
+  async getAmbassadorPortalView(code: string): Promise<AmbassadorPortalView | null> {
+    try {
+      const res = await fetch(`/api/ambassador/${encodeURIComponent(code)}/stats`);
+      if (!res.ok) return null;
+      const data = await res.json();
+      return data.success ? (data as AmbassadorPortalView & { success: boolean }) : null;
+    } catch {
+      return null;
+    }
+  },
+
+  /** Console Direction : registre complet des ambassadeurs */
+  async listAmbassadors(): Promise<AmbassadorSummary[]> {
+    try {
+      const res = await this._adminFetch('/api/admin/ambassadors');
+      if (!res.ok) return [];
+      return await res.json() as AmbassadorSummary[];
+    } catch {
+      return [];
+    }
+  },
+
+  /** Console Direction : création manuelle d'un ambassadeur */
+  async createAmbassador(fullName: string, email: string, phone: string, termsAccepted = true): Promise<AmbassadorRegistrationResponse> {
+    const res = await this._adminFetch('/api/admin/ambassadors', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fullName: sanitizeSafeText(fullName), email, phone, termsAccepted })
+    });
+    const data = await res.json();
+    if (!res.ok || !data.success) {
+      throw new Error(data.message || 'Échec de création de l\'ambassadeur.');
+    }
+    return data as AmbassadorRegistrationResponse;
+  },
+
+  /** Console Direction : ventes rattachées à un ambassadeur */
+  async listAmbassadorSales(ambassadorId: string): Promise<AmbassadorSalesEntry[]> {
+    const res = await this._adminFetch(`/api/admin/ambassadors/${encodeURIComponent(ambassadorId)}/sales`);
+    if (!res.ok) throw new Error('Échec du chargement des ventes.');
+    return await res.json() as AmbassadorSalesEntry[];
+  },
+
+  /** Console Direction : versement des commissions gagnées (bouton « Payé ») */
+  async payAmbassadorCommissions(ambassadorId: string): Promise<{ success: boolean; marked: number; totalUsd: number; skippedInHold: number }> {
+    const res = await this._adminFetch(`/api/admin/ambassadors/${encodeURIComponent(ambassadorId)}/pay`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({})
+    });
+    const data = await res.json();
+    if (!res.ok || !data.success) {
+      throw new Error(data.message || 'Échec du versement.');
+    }
+    return data;
+  },
+
+  /** Console Direction : suspendre / réactiver un ambassadeur */
+  async setAmbassadorStatus(ambassadorId: string, active: boolean): Promise<{ success: boolean; ambassador: Ambassador }> {
+    const res = await this._adminFetch(`/api/admin/ambassadors/${encodeURIComponent(ambassadorId)}/status`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ active })
+    });
+    const data = await res.json();
+    if (!res.ok || !data.success) {
+      throw new Error(data.message || 'Échec de la mise à jour du statut.');
     }
     return data;
   },

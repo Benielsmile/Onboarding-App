@@ -10,6 +10,10 @@ export type ParticipantStatus = 'PENDING' | 'CONFIRMED' | 'REJECTED' | 'REVOKED'
 
 export type PaymentProvider = 'ORANGE_MONEY';
 
+export type CommissionStatus = 'PENDING' | 'EARNED' | 'PAID' | 'CANCELLED';
+
+export type AmbassadorStatus = 'ACTIVE' | 'SUSPENDED';
+
 export interface Participant {
   id: string;
   fullName: string;
@@ -35,6 +39,10 @@ export interface Participant {
   adminNotes?: string;
   revokedAt?: string;
   revocationReason?: string;
+  // Affiliation ambassadeur (liée automatiquement via ?ref= à l'inscription)
+  ambassadorCode?: string;
+  commissionUsd?: number;
+  commissionStatus?: CommissionStatus;
 }
 
 export interface RegistrationRequest {
@@ -45,6 +53,8 @@ export interface RegistrationRequest {
   transactionReference: string;
   proofBase64?: string;
   proofFileName?: string;
+  /** Code d'affiliation ambassadeur capturé via ?ref=AMB-XXXX (optionnel) */
+  ref?: string;
   ndaAccepted: boolean;
   // Client cannot dictate price nor provider (Orange Money only, strictly verified server-side)
 }
@@ -102,7 +112,7 @@ export interface ProgramConfig {
 export interface AuditLogEntry {
   id: string;
   adminId: string;
-  actionType: 'CONFIRM_PAYMENT' | 'REJECT_PAYMENT' | 'REVOKE_RESERVATION' | 'DOWNLOAD_TICKET' | 'VIEW_PROOF' | 'RESEND_WHATSAPP' | 'ADMIN_LOGIN' | 'UPDATE_PROGRAM_CONFIG' | 'EXPORT_DASHBOARD_PDF' | 'RESET_WORKSHOP_DATA';
+  actionType: 'CONFIRM_PAYMENT' | 'REJECT_PAYMENT' | 'REVOKE_RESERVATION' | 'DOWNLOAD_TICKET' | 'VIEW_PROOF' | 'RESEND_WHATSAPP' | 'ADMIN_LOGIN' | 'UPDATE_PROGRAM_CONFIG' | 'EXPORT_DASHBOARD_PDF' | 'RESET_WORKSHOP_DATA' | 'AMBASSADOR_CREATE' | 'AMBASSADOR_PAYOUT' | 'AMBASSADOR_SUSPEND';
   participantId?: string;
   timestamp: string;
   userAgent: string;
@@ -193,4 +203,82 @@ export interface InventoryStatus {
 export interface SignedUrlResponse {
   signedUrl: string;
   expiresAt: number; // Unix timestamp ms
+}
+
+// ============================================================================
+// AMBASSADEURS PIGA STUDIO (affiliation & commissions 15%)
+// ============================================================================
+export interface Ambassador {
+  id: string;
+  code: string;
+  fullName: string;
+  email: string;
+  phoneInternational: string;
+  commissionRate: number;
+  payoutProvider: string;
+  payoutNumber?: string;
+  status: AmbassadorStatus;
+  createdAt: string;
+  /** Horodatage de la condition d'acceptation (commission après confirmation + 48h) */
+  commissionTermsAcceptedAt?: string;
+}
+
+/** Statistiques agrégées d'un ambassadeur (portail public + console) */
+export interface AmbassadorStats {
+  clicks: number;
+  validatedSales: number;
+  pendingSales: number;
+  earnedUsd: number;
+  pendingUsd: number;
+  /** Commissions gagnées MAIS en délai de traitement de 48h (non encore payables) */
+  inHoldUsd: number;
+}
+
+export interface AmbassadorSummary extends Ambassador, AmbassadorStats {
+  conversionRate: number; // validatedSales / clicks (0 si clics = 0)
+  paidUsd: number; // commissions déjà versées par la Direction
+  toPayUsd: number; // commissions gagnées en attente de versement
+}
+
+/** Vue publique du portail ambassadeur (magic link) */
+export interface AmbassadorPortalView {
+  ambassador: {
+    code: string;
+    fullName: string;
+    status: AmbassadorStatus;
+    commissionRate: number;
+    commissionPerSaleUsd: number;
+  };
+  stats: AmbassadorStats;
+  /** Détail du cycle de vie des commissions (règle des 48h) */
+  paidUsd: number;
+  toPayUsd: number;
+  formation: {
+    title: string;
+    dateDisplay: string;
+    ticketPriceUsd: number;
+    totalCapacity: number;
+    heroImageUrl?: string;
+  };
+}
+
+/** Inscription d'un ambassadeur (recrutement public ou console) */
+export interface AmbassadorRegistrationResponse {
+  success: boolean;
+  message?: string;
+  ambassador?: Ambassador;
+  /** Vrai si un ambassadeur actif existait déjà pour ce numéro (renvoi du code) */
+  alreadyRegistered?: boolean;
+}
+
+export interface AmbassadorSalesEntry {
+  participantId: string;
+  fullName: string;
+  ticketCode?: string;
+  status: ParticipantStatus;
+  priceUsd: number;
+  commissionUsd: number;
+  commissionStatus?: CommissionStatus;
+  commissionPaidAt?: string;
+  createdAt: string;
 }

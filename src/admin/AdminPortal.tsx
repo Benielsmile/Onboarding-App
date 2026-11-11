@@ -43,16 +43,21 @@ import {
   Trash2,
   Copy,
   ChevronDown,
-  Menu
+  Menu,
+  Megaphone,
+  Wallet,
+  Ban,
+  RotateCcw
 } from 'lucide-react';
 // — Aucun import html5-qrcode : moteur natif BarcodeDetector + flux caméra pilotés ici —
 import { PigaLogo } from '../components/PigaLogo.tsx';
 import { ThemeToggle } from '../components/ThemeToggle.tsx';
 import { FormationEditor } from './FormationEditor.tsx';
-import type { Participant, AuditLogEntry, InventoryStatus, CryptographicTokenVerification, ProgramConfig, AdminStats } from '../types/index.ts';
+import type { Participant, AuditLogEntry, InventoryStatus, CryptographicTokenVerification, ProgramConfig, AdminStats, AmbassadorSummary, AmbassadorSalesEntry } from '../types/index.ts';
 import { api, sanitizeSafeText } from '../services/api.ts';
 import { downloadTicketPDF } from '../utils/pdfGenerator.ts';
 import { downloadDashboardReportPDF } from '../utils/dashboardPdfGenerator.ts';
+import { generateAmbassadorOnboardingMessage } from '../utils/ambassadorKit.ts';
 import { DEFAULT_PROGRAM_CONFIG } from '../utils/programPresets.ts';
 import { 
   generateWhatsAppConfirmationUrl, 
@@ -66,7 +71,8 @@ import {
 } from '../utils/whatsappHelper.ts';
 import { 
   usePWAInstall, 
-  requestNotificationPermission, 
+  requestNotificationPermission,
+  subscribeWebPush,
   triggerNativePushNotification 
 } from '../utils/pwaNotifications.ts';
 
@@ -85,7 +91,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToClient, curren
   const [isAuthenticating, setIsAuthenticating] = useState(false);
 
   // Active Tab: 'dashboard' | 'participants' | 'scanner' | 'audit'
-  const [currentTab, setCurrentTab] = useState<'formation' | 'dashboard' | 'participants' | 'scanner' | 'audit'>('formation');
+  const [currentTab, setCurrentTab] = useState<'formation' | 'dashboard' | 'participants' | 'ambassadeurs' | 'scanner' | 'audit'>('formation');
   // Mobile navbar: collapsible / expandable (dernière pièce UX mobile)
   const [isMobileNavOpen, setIsMobileNavOpen] = useState(false);
   // Mobile header: panneau déplié du hamburger (écrans très petits)
@@ -97,6 +103,17 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToClient, curren
   const [inventory, setInventory] = useState<InventoryStatus | null>(null);
   const [adminStats, setAdminStats] = useState<AdminStats | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+
+  // Registre Ambassadeurs (affiliation 15%)
+  const [ambassadors, setAmbassadors] = useState<AmbassadorSummary[]>([]);
+  const [ambassadorSales, setAmbassadorSales] = useState<Record<string, AmbassadorSalesEntry[]>>({});
+  const [ambassadorFormOpen, setAmbassadorFormOpen] = useState(false);
+  const [ambassadorFullName, setAmbassadorFullName] = useState('');
+  const [ambassadorEmail, setAmbassadorEmail] = useState('');
+  const [ambassadorPhone, setAmbassadorPhone] = useState('');
+  const [ambassadorTermsAccepted, setAmbassadorTermsAccepted] = useState(false);
+  const [isCreatingAmbassador, setIsCreatingAmbassador] = useState(false);
+  const [payingAmbassadorId, setPayingAmbassadorId] = useState<string | null>(null);
 
   // Filters
   const [searchQuery, setSearchQuery] = useState('');
@@ -154,9 +171,14 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToClient, curren
     const perm = await requestNotificationPermission();
     setNotificationPermission(perm);
     if (perm === 'granted') {
+      // Abonnement au push serveur (W3C Web Push / VAPID) : la Direction reçoit
+      // les alertes de NOUVEAUX PAIEMENTS Orange Money sur tous ses terminaux.
+      const pushResult = await subscribeWebPush('ADMIN');
       triggerNativePushNotification(
         'PIGA STUDIO · Notifications PWA Activées',
-        'Vous recevrez désormais les alertes de nouveaux paiements Orange Money directement dans votre barre de notification.'
+        pushResult.ok
+          ? 'Terminal inscrit : alertes temps réel de nouveaux paiements Orange Money depuis n\'importe quel appareil.'
+          : 'Alertes locales actives. Push serveur : ' + pushResult.message
       );
     }
   };
@@ -164,14 +186,16 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToClient, curren
   const loadData = async () => {
     setIsLoading(true);
     try {
-      const [parts, logs, inv] = await Promise.all([
+      const [parts, logs, inv, ambs] = await Promise.all([
         api.getParticipants(),
         api.getAuditLogs(),
-        api.getInventoryStats()
+        api.getInventoryStats(),
+        api.listAmbassadors()
       ]);
       setParticipants(parts);
       setAuditLogs(logs);
       setInventory(inv);
+      setAmbassadors(ambs);
       api.getAdminStats().then(stats => setAdminStats(stats)).catch(() => {});
     } catch (err) {
       console.error('[ADMIN LOAD ERROR]:', err);
@@ -424,6 +448,78 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToClient, curren
       alert(err instanceof Error ? err.message : 'Erreur lors du nettoyage de la console.');
     } finally {
       setIsWiping(false);
+    }
+  };
+
+  // 9. Ambassadeurs — création, versement de commissions, suspension
+  const handleCreateAmbassador = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsCreatingAmbassador(true);
+    try {
+      const result = await api.createAmbassador(ambassadorFullName.trim(), ambassadorEmail.trim(), ambassadorPhone.trim(), ambassadorTermsAccepted);
+      const ambassador = result.ambassador;
+      setAmbassadorFullName(''); setAmbassadorEmail(''); setAmbassadorPhone('');
+      setAmbassadorTermsAccepted(false);
+      setAmbassadorFormOpen(false);
+      await loadData();
+      if (ambassador) {
+        const link = `${window.location.origin}/?ref=${ambassador.code}`;
+        const onboarding = generateAmbassadorOnboardingMessage(ambassador);
+        try { await navigator.clipboard.writeText(`${onboarding}\n\n🔗 ${link}`); } catch { /* clipboard indisponible */ }
+        setActionSuccessMessage(
+          `Ambassadeur ${ambassador.code} enrôlé. Message d'onboarding WhatsApp copié — collez-le dans la discussion du client. Lien magique : ${link}`
+        );
+        setTimeout(() => setActionSuccessMessage(null), 9000);
+      }
+    } catch (err: unknown) {
+      alert(err instanceof Error ? err.message : 'Erreur lors de la création de l\'ambassadeur.');
+    } finally {
+      setIsCreatingAmbassador(false);
+    }
+  };
+
+  const handlePayAmbassador = async (ambassadorId: string, ambassadorCode: string, toPayUsd: number) => {
+    if (!confirm(`Marquer les commissions de ${ambassadorCode} comme VERSÉES ? Total payable : $${toPayUsd.toFixed(2)} (via Orange Money). Les commissions encore en délai de traitement (48h) seront ignorées.`)) return;
+    setPayingAmbassadorId(ambassadorId);
+    try {
+      const result = await api.payAmbassadorCommissions(ambassadorId);
+      await loadData();
+      const holdNote = result.skippedInHold > 0 ? ` ${result.skippedInHold} commission(s) restent en délai de traitement 48h.` : '';
+      setActionSuccessMessage(`${result.marked} commission(s) marquée(s) payée(s) pour ${ambassadorCode} — $${result.totalUsd.toFixed(2)} versé(s).${holdNote} Traçabilité inscrite dans l'audit immuable.`);
+      setTimeout(() => setActionSuccessMessage(null), 8000);
+    } catch (err: unknown) {
+      alert(err instanceof Error ? err.message : 'Erreur lors du versement.');
+    } finally {
+      setPayingAmbassadorId(null);
+    }
+  };
+
+  const handleToggleAmbassadorStatus = async (ambassadorId: string, ambassadorCode: string, active: boolean) => {
+    if (!confirm(active ? `Réactiver ${ambassadorCode} ?` : `Suspendre ${ambassadorCode} ? Son lien magique cessera d'attribuer les ventes.`)) return;
+    try {
+      await api.setAmbassadorStatus(ambassadorId, active);
+      await loadData();
+      setActionSuccessMessage(active ? `Ambassadeur ${ambassadorCode} réactivé.` : `Ambassadeur ${ambassadorCode} suspendu.`);
+      setTimeout(() => setActionSuccessMessage(null), 5000);
+    } catch (err: unknown) {
+      alert(err instanceof Error ? err.message : 'Erreur lors de la mise à jour du statut.');
+    }
+  };
+
+  const handleViewAmbassadorSales = async (ambassadorId: string) => {
+    if (ambassadorSales[ambassadorId]) {
+      setAmbassadorSales(prev => {
+        const next = { ...prev };
+        delete next[ambassadorId];
+        return next;
+      });
+      return;
+    }
+    try {
+      const sales = await api.listAmbassadorSales(ambassadorId);
+      setAmbassadorSales(prev => ({ ...prev, [ambassadorId]: sales }));
+    } catch (err: unknown) {
+      alert(err instanceof Error ? err.message : 'Erreur lors du chargement des ventes.');
     }
   };
 
@@ -1004,6 +1100,18 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToClient, curren
             </button>
 
             <button
+              onClick={() => setCurrentTab('ambassadeurs')}
+              className={`px-4 py-2 text-xs font-bold font-montserrat rounded-md transition-colors cursor-pointer flex items-center gap-2 ${
+                currentTab === 'ambassadeurs'
+                  ? 'bg-[#E50914] text-white'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white bg-slate-100 dark:bg-[#0E0E0E]'
+              }`}
+            >
+              <Megaphone className="w-3.5 h-3.5" />
+              <span>Ambassadeurs ({ambassadors.length})</span>
+            </button>
+
+            <button
               onClick={() => setCurrentTab('scanner')}
               className={`px-4 py-2 text-xs font-bold font-montserrat rounded-md transition-colors cursor-pointer flex items-center gap-2 ${
                 currentTab === 'scanner'
@@ -1198,6 +1306,253 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToClient, curren
         {currentTab === 'dashboard' && !adminStats && (
           <div className="text-xs text-slate-400 py-10 text-center font-inter">
             Analyse commerciale indisponible — reconnectez-vous à la console.
+          </div>
+        )}
+
+        {/* ==================================================================== */}
+        {/* TAB: AMBASSADEURS PIGA STUDIO (armée de distribution — 15% / vente) */}
+        {/* ==================================================================== */}
+        {currentTab === 'ambassadeurs' && (
+          <div className="space-y-4 animate-fade-in">
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+              <div>
+                <div className="text-xs font-bold font-montserrat text-slate-900 dark:text-white uppercase tracking-wider">
+                  Armée de Distribution · Suivi &amp; Commissions
+                </div>
+                <div className="text-[11px] text-slate-500 mt-1">
+                  Lien magique <span className="font-mono">?ref=AMB-XXXX</span> · Commission enregistrée uniquement sur les ventes VALIDÉES Orange Money · Paie traçable dans l'audit immuable.
+                </div>
+              </div>
+              <button
+                onClick={() => setAmbassadorFormOpen(o => !o)}
+                className="px-4 py-2.5 text-xs font-bold font-montserrat text-white bg-[#E50914] hover:bg-[#C80711] rounded-md transition-colors flex items-center gap-2 cursor-pointer shadow-xs shrink-0"
+              >
+                <Megaphone className="w-4 h-4" />
+                <span>{ambassadorFormOpen ? 'Fermer le formulaire' : 'Enrôler un Ambassadeur'}</span>
+              </button>
+            </div>
+
+            {/* Formulaire d'enrôlement manuel */}
+            {ambassadorFormOpen && (
+              <form onSubmit={handleCreateAmbassador} className="p-5 rounded-xl bg-white dark:bg-[#0A0A0A] border border-slate-200 dark:border-[#1E1E1E] space-y-4 shadow-xs">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5 font-montserrat">Nom Complet *</label>
+                    <input
+                      type="text"
+                      value={ambassadorFullName}
+                      onChange={(e) => setAmbassadorFullName(e.target.value)}
+                      placeholder="Ex: Christelle Kabedi"
+                      className="w-full px-3 py-2 bg-slate-50 dark:bg-[#111111] border border-slate-300 dark:border-[#262626] focus:border-[#E50914] rounded-md text-xs text-slate-900 dark:text-white outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5 font-montserrat">Numéro WhatsApp RDC *</label>
+                    <input
+                      type="tel"
+                      value={ambassadorPhone}
+                      onChange={(e) => setAmbassadorPhone(e.target.value)}
+                      placeholder="0803240289 ou +243..."
+                      className="w-full px-3 py-2 bg-slate-50 dark:bg-[#111111] border border-slate-300 dark:border-[#262626] focus:border-[#E50914] rounded-md text-xs text-slate-900 dark:text-white font-mono outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5 font-montserrat">E-mail *</label>
+                    <input
+                      type="email"
+                      value={ambassadorEmail}
+                      onChange={(e) => setAmbassadorEmail(e.target.value)}
+                      placeholder="ambassadeur@exemple.cd"
+                      className="w-full px-3 py-2 bg-slate-50 dark:bg-[#111111] border border-slate-300 dark:border-[#262626] focus:border-[#E50914] rounded-md text-xs text-slate-900 dark:text-white outline-none"
+                    />
+                  </div>
+                </div>
+                <div className="flex items-center justify-between gap-3">
+                  <label className="flex items-start gap-2 text-[11px] text-slate-600 dark:text-slate-400 max-w-xl cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={ambassadorTermsAccepted}
+                      onChange={(e) => setAmbassadorTermsAccepted(e.target.checked)}
+                      className="mt-0.5 w-4 h-4 cursor-pointer accent-[#E50914]"
+                    />
+                    <span>
+                      L'ambassadeur accepte les <strong>conditions de commission</strong> : versement uniquement après
+                      confirmation du paiement Orange Money de son affilié + délai de traitement de <strong>48 heures</strong>.
+                    </span>
+                  </label>
+                  <button
+                    type="submit"
+                    disabled={isCreatingAmbassador || !ambassadorTermsAccepted || ambassadorFullName.trim().length < 3 || !ambassadorEmail.includes('@') || ambassadorPhone.trim().length < 8}
+                    className="px-5 py-2.5 text-xs font-bold font-montserrat text-white bg-[#10B981] hover:bg-[#059669] disabled:bg-slate-300 dark:disabled:bg-slate-800 disabled:text-slate-500 rounded-md transition-colors cursor-pointer shrink-0"
+                  >
+                    {isCreatingAmbassador ? 'Enrôlement…' : 'Créer & Copier le Kit'}
+                  </button>
+                </div>
+              </form>
+            )}
+
+            {/* Classement des ambassadeurs */}
+            <div className="rounded-xl bg-white dark:bg-[#0A0A0A] border border-slate-200 dark:border-[#1E1E1E] overflow-hidden shadow-xs">
+              <div className="px-5 py-4 bg-slate-50 dark:bg-[#050505] border-b border-slate-200 dark:border-[#1E1E1E]">
+                <div className="text-xs font-bold font-montserrat text-slate-900 dark:text-white uppercase tracking-wider">
+                  Classement des Ambassadeurs · Top Vendeur
+                </div>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs">
+                  <thead className="border-b border-slate-200 dark:border-[#1E1E1E] text-slate-500 dark:text-slate-400 uppercase font-montserrat text-[10px]">
+                    <tr>
+                      <th className="px-4 py-3">Ambassadeur</th>
+                      <th className="px-4 py-3">Clics</th>
+                      <th className="px-4 py-3">Ventes validées</th>
+                      <th className="px-4 py-3">En instance</th>
+                      <th className="px-4 py-3">Gains totaux</th>
+                      <th className="px-4 py-3" title="Commissions confirmées depuis plus de 48h — versables">Payable</th>
+                      <th className="px-4 py-3" title="Commissions confirmées il y a moins de 48h — délai de traitement">Délai 48h</th>
+                      <th className="px-4 py-3">Déjà payé</th>
+                      <th className="px-4 py-3 text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 dark:divide-[#1A1A1A]">
+                    {ambassadors.length === 0 ? (
+                      <tr>
+                        <td colSpan={9} className="text-center py-10 text-slate-400 dark:text-slate-500 font-inter">
+                          Aucun ambassadeur enrôlé. Utilisez « Enrôler un Ambassadeur » ou le portail public (#ambassadeur).
+                        </td>
+                      </tr>
+                    ) : (
+                      ambassadors.map((a, index) => (
+                        <React.Fragment key={a.id}>
+                          <tr className="hover:bg-slate-50 dark:hover:bg-[#0E0E0E] transition-colors">
+                            <td className="px-4 py-3.5">
+                              <div className="flex items-center gap-2">
+                                {index === 0 && a.validatedSales > 0 && (
+                                  <span className="px-1.5 py-0.5 rounded bg-amber-400 text-black text-[9px] font-bold uppercase" title="Top Ambassadeur">👑 Top</span>
+                                )}
+                                <div>
+                                  <div className="font-bold text-slate-900 dark:text-white font-montserrat">{a.fullName}</div>
+                                  <div className="font-mono text-[10px] text-[#E50914]">{a.code} · {Math.round(a.commissionRate * 100)}%</div>
+                                </div>
+                              </div>
+                              <div className="text-[10px] text-slate-500 mt-1 font-mono">+{a.phoneInternational}</div>
+                            </td>
+                            <td className="px-4 py-3.5 font-mono text-slate-700 dark:text-slate-300">{a.clicks}</td>
+                            <td className="px-4 py-3.5 font-mono font-bold text-[#10B981]">{a.validatedSales}</td>
+                            <td className="px-4 py-3.5 font-mono text-amber-600 dark:text-amber-400">{a.pendingSales}</td>
+                            <td className="px-4 py-3.5 font-mono font-bold text-slate-900 dark:text-white">${a.earnedUsd.toFixed(2)}</td>
+                            <td className="px-4 py-3.5 font-mono font-bold text-[#E50914]">{a.toPayUsd > 0 ? `$${a.toPayUsd.toFixed(2)}` : '—'}</td>
+                            <td className="px-4 py-3.5 font-mono text-amber-600 dark:text-amber-400">{a.inHoldUsd > 0 ? `$${a.inHoldUsd.toFixed(2)}` : '—'}</td>
+                            <td className="px-4 py-3.5 font-mono text-slate-500">{a.paidUsd > 0 ? `$${a.paidUsd.toFixed(2)}` : '—'}</td>
+                            <td className="px-4 py-3.5 text-right">
+                              <div className="flex items-center justify-end gap-1.5">
+                                <button
+                                  onClick={() => {
+                                    const link = `${window.location.origin}/?ref=${a.code}`;
+                                    void navigator.clipboard.writeText(`${generateAmbassadorOnboardingMessage({
+                                      id: a.id, code: a.code, fullName: a.fullName, email: a.email,
+                                      phoneInternational: a.phoneInternational, commissionRate: a.commissionRate,
+                                      payoutProvider: a.payoutProvider, payoutNumber: a.payoutNumber,
+                                      status: a.status, createdAt: a.createdAt
+                                    })}\n\n🔗 ${link}`).then(() => alert('Kit d\'onboarding + lien copié — collez-le dans WhatsApp.'));
+                                  }}
+                                  className="px-2.5 py-1.5 text-[11px] font-semibold text-[#10B981] bg-[#10B981]/10 border border-[#10B981]/30 rounded flex items-center gap-1 hover:bg-[#10B981]/20 transition-colors cursor-pointer"
+                                  title="Copier le message d'onboarding WhatsApp avec le lien magique"
+                                >
+                                  <Copy className="w-3.5 h-3.5" />
+                                  <span>Kit</span>
+                                </button>
+
+                                {a.toPayUsd > 0 && (
+                                  <button
+                                    disabled={payingAmbassadorId === a.id}
+                                    onClick={() => handlePayAmbassador(a.id, a.code, a.toPayUsd)}
+                                    className="px-2.5 py-1.5 text-[11px] font-bold text-white bg-[#10B981] hover:bg-[#059669] disabled:opacity-50 rounded flex items-center gap-1 transition-colors cursor-pointer"
+                                    title={`Verser $${a.toPayUsd.toFixed(2)} de commissions (marquer payé)`}
+                                  >
+                                    <Wallet className="w-3.5 h-3.5" />
+                                    <span>{payingAmbassadorId === a.id ? 'Paie…' : `Payer $${a.toPayUsd.toFixed(2)}`}</span>
+                                  </button>
+                                )}
+
+                                <button
+                                  onClick={() => handleToggleAmbassadorStatus(a.id, a.code, a.status === 'SUSPENDED')}
+                                  className={`px-2 py-1.5 text-[11px] rounded border flex items-center gap-1 transition-colors cursor-pointer ${
+                                    a.status === 'ACTIVE'
+                                      ? 'text-slate-600 dark:text-slate-300 border-slate-300 dark:border-[#2E2E2E] hover:bg-slate-100 dark:hover:bg-[#1E1E1E]'
+                                      : 'text-emerald-600 dark:text-emerald-400 border-emerald-300 dark:border-emerald-900/60 hover:bg-emerald-50 dark:hover:bg-emerald-950/30'
+                                  }`}
+                                  title={a.status === 'ACTIVE' ? 'Suspendre le lien magique' : 'Réactiver'}
+                                >
+                                  {a.status === 'ACTIVE' ? <Ban className="w-3.5 h-3.5" /> : <RotateCcw className="w-3.5 h-3.5" />}
+                                  <span>{a.status === 'ACTIVE' ? 'Suspendre' : 'Réactiver'}</span>
+                                </button>
+
+                                <button
+                                  onClick={() => handleViewAmbassadorSales(a.id)}
+                                  className="p-1.5 text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white rounded cursor-pointer"
+                                  title="Détail des ventes rattachées"
+                                >
+                                  <ChevronDown className={`w-4 h-4 transition-transform ${ambassadorSales[a.id] ? 'rotate-180' : ''}`} />
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+
+                          {/* Détail des ventes rattachées */}
+                          {ambassadorSales[a.id] && (
+                            <tr className="bg-slate-50 dark:bg-[#050505]">
+                              <td colSpan={9} className="px-4 py-3">
+                                <div className="text-[10px] font-bold font-montserrat uppercase tracking-wider text-slate-500 mb-2">
+                                  Ventes rattachées à {a.code} (traçabilité zéro litige)
+                                </div>
+                                {ambassadorSales[a.id].length === 0 ? (
+                                  <div className="text-[11px] text-slate-400">Aucune vente rattachée pour le moment.</div>
+                                ) : (
+                                  <div className="space-y-1.5">
+                                    {ambassadorSales[a.id].map(s => (
+                                      <div key={s.participantId} className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 rounded bg-white dark:bg-[#0A0A0A] border border-slate-200 dark:border-[#1E1E1E] text-[11px]">
+                                        <span className="font-semibold text-slate-900 dark:text-white">{s.fullName}</span>
+                                        <span className="font-mono text-slate-500">{s.ticketCode || '—'}</span>
+                                        <span className="font-mono">${s.priceUsd.toFixed(2)} → commission ${s.commissionUsd.toFixed(2)}</span>
+                                        <span className={`px-2 py-0.5 rounded text-[10px] font-semibold ${
+                                          s.status === 'CONFIRMED'
+                                            ? 'bg-[#10B981]/15 text-[#10B981]'
+                                            : s.status === 'PENDING'
+                                            ? 'bg-amber-500/15 text-amber-600 dark:text-amber-400'
+                                            : 'bg-red-500/15 text-red-600 dark:text-red-400'
+                                        }`}>
+                                          {s.status === 'CONFIRMED' ? `Validée · ${s.commissionStatus === 'PAID' ? 'Payée' : 'À verser'}` : s.status === 'PENDING' ? 'En attente' : 'Annulée'}
+                                        </span>
+                                        <span className="text-slate-400 font-mono">{s.createdAt ? new Date(s.createdAt).toLocaleDateString('fr-FR') : '—'}</span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+                              </td>
+                            </tr>
+                          )}
+                        </React.Fragment>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* Lien du portail de recrutement public */}
+            <div className="p-4 rounded-xl bg-[#E50914]/5 border border-[#E50914]/25 text-[11px] text-slate-600 dark:text-slate-400 flex items-center gap-2">
+              <Megaphone className="w-4 h-4 text-[#E50914] shrink-0" />
+              <span>
+                Vos prospects ambassadeurs peuvent aussi s'enrôler eux-mêmes via le portail public :{' '}
+                <button
+                  onClick={() => { window.history.pushState(null, '', '#ambassadeur'); window.location.reload(); }}
+                  className="text-[#E50914] font-bold hover:underline cursor-pointer"
+                >
+                  {`${window.location.origin}/#ambassadeur`}
+                </button>
+                {' '}— statut officiel, lien magique et Kit de Survie générés instantanément.
+              </span>
+            </div>
           </div>
         )}
 

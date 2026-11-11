@@ -13,7 +13,7 @@
  */
 
 import React, { useState } from 'react';
-import { X, Check, AlertCircle, Upload, ShieldCheck, ArrowRight, ArrowLeft, Copy, CheckCircle2, Clock, MessageSquare, FileDown, MessageCircle } from 'lucide-react';
+import { X, Check, AlertCircle, Upload, ShieldCheck, ArrowRight, ArrowLeft, Copy, CheckCircle2, Clock, MessageSquare, FileDown, MessageCircle, Award } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { cleanAndValidateDRCPhone } from '../utils/drcPhoneValidator.ts';
 import { api } from '../services/api.ts';
@@ -33,6 +33,8 @@ interface ClientOnboardingModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSuccess: () => void;
+  /** Code d'affiliation capturé via ?ref=AMB-XXXX (lien magique ambassadeur) */
+  refCode?: string;
 }
 
 /**
@@ -70,7 +72,8 @@ export const ClientOnboardingModal: React.FC<ClientOnboardingModalProps> = ({
   programConfig,
   isOpen,
   onClose,
-  onSuccess
+  onSuccess,
+  refCode
 }) => {
   const [currentStep, setCurrentStep] = useState<1 | 2 | 3 | 4>(1);
 
@@ -175,7 +178,8 @@ export const ClientOnboardingModal: React.FC<ClientOnboardingModalProps> = ({
         transactionReference: transactionRef,
         proofBase64: screenshotBase64 || undefined,
         proofFileName: screenshotName || 'capture_orangemoney.jpg',
-        ndaAccepted: true
+        ndaAccepted: true,
+        ref: refCode
       });
 
       setSubmittedData(response);
@@ -266,6 +270,12 @@ export const ClientOnboardingModal: React.FC<ClientOnboardingModalProps> = ({
                 <p className="text-xs text-slate-500 dark:text-slate-400">
                   Votre numéro WhatsApp servira à la délivrance de votre laissez-passer cryptographique PIGA STUDIO.
                 </p>
+                {refCode && (
+                  <div className="mt-2 inline-flex items-center gap-1.5 px-2.5 py-1 rounded bg-[#E50914]/10 border border-[#E50914]/30 text-[10px] font-mono text-[#E50914]">
+                    <Award className="w-3 h-3" />
+                    <span>Parrainage ambassadeur : {refCode.toUpperCase()}</span>
+                  </div>
+                )}
               </div>
 
               <div className="space-y-4">

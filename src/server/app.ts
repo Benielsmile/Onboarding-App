@@ -21,6 +21,7 @@ import { TRAINING_PRESETS } from '../utils/programPresets.ts';
 import type { RegistrationRequest } from '../types/index.ts';
 import { generateTicketPDF } from '../utils/pdfGenerator.ts';
 import type { FormationMessageInfo } from '../utils/whatsappHelper.ts';
+import { isPushEnabled, getVapidPublicKey, notifyAdminNewPayment, notifyAmbassadorSale } from './pushService.ts';
 import {
   NeonStore,
   initNeon,
@@ -293,6 +294,10 @@ export async function createPigaApp(options: CreateAppOptions = {}): Promise<Exp
 
       const participant = await store.registerParticipantAtomic(req.body as RegistrationRequest, clientIp, userAgent);
 
+      // Push serveur : alerte la Direction (terminaux inscrits) qu'un paiement
+      // Orange Money attend sa vérification manuelle.
+      void notifyAdminNewPayment(store, participant);
+
       return res.status(201).json({
         success: true,
         participantId: participant.id,
@@ -325,6 +330,68 @@ export async function createPigaApp(options: CreateAppOptions = {}): Promise<Exp
         success: false,
         message: userFriendlyMessage
       });
+    }
+  });
+
+  // 2b. Ambassadeur : candidature publique (recrutement de l'armée de distribution)
+  app.post('/api/ambassador/register', async (req: Request, res: Response) => {
+    try {
+      const { fullName, email, phone, termsAccepted } = req.body || {};
+      const clientIp = safelyGetClientIp(req);
+      const userAgent = req.headers['user-agent'] || 'Unknown-Client';
+
+      const result = await store.createAmbassador(
+        { fullName, email, phone, termsAccepted },
+        'SELF_REGISTERED',
+        clientIp,
+        userAgent
+      );
+
+      return res.status(201).json({
+        success: true,
+        alreadyRegistered: result.alreadyRegistered,
+        ambassador: result.ambassador,
+        message: result.alreadyRegistered
+          ? 'Ambassadeur déjà enregistré : voici à nouveau votre lien officiel.'
+          : 'Bienvenue dans l\'Armée de Distribution PIGA STUDIO ! Votre lien magique est actif.'
+      });
+    } catch (err: unknown) {
+      console.error('[AMBASSADOR REGISTER ERROR]:', err);
+      const errMessage = err instanceof Error ? err.message : '';
+      let userFriendlyMessage = 'Échec de la candidature ambassadeur. Réessayez.';
+      if (errMessage.includes('DRC_PHONE_INVALID')) userFriendlyMessage = errMessage.replace('DRC_PHONE_INVALID: ', '');
+      else if (errMessage.includes('EMAIL_INVALID')) userFriendlyMessage = 'Adresse e-mail invalide.';
+      else if (errMessage.includes('NAME_INVALID')) userFriendlyMessage = 'Nom complet requis (3 caractères minimum).';
+      else if (errMessage.includes('AMBASSADOR_RATE_LIMITED')) userFriendlyMessage = errMessage.replace('AMBASSADOR_RATE_LIMITED: ', '');
+      else if (errMessage.includes('TERMS_REQUIRED')) userFriendlyMessage = errMessage.replace('TERMS_REQUIRED: ', '');
+      return res.status(400).json({ success: false, message: userFriendlyMessage });
+    }
+  });
+
+  // 2c. Ambassadeur : ping de tracking du lien magique (dédupliqué jour + IP)
+  app.post('/api/ambassador/:code/click', async (req: Request, res: Response) => {
+    try {
+      const clientIp = safelyGetClientIp(req);
+      const ipHash = crypto.createHmac('sha256', MASTER_SECRET).update(clientIp).digest('hex').slice(0, 32);
+      const recorded = await store.recordAmbassadorClick(String(req.params.code), ipHash, req.headers['user-agent'] || 'Unknown-Client');
+      return res.json({ success: true, recorded });
+    } catch (err) {
+      console.error('[AMBASSADOR CLICK ERROR]:', err);
+      return res.json({ success: true, recorded: false });
+    }
+  });
+
+  // 2d. Ambassadeur : tableau de bord public via lien magique
+  app.get('/api/ambassador/:code/stats', async (req: Request, res: Response) => {
+    try {
+      const view = await store.getAmbassadorPortalView(String(req.params.code));
+      if (!view) {
+        return res.status(404).json({ success: false, message: 'Code ambassadeur introuvable dans le registre PIGA STUDIO.' });
+      }
+      return res.json({ success: true, ...view });
+    } catch (err) {
+      console.error('[AMBASSADOR STATS ERROR]:', err);
+      return res.status(500).json({ success: false, message: 'Échec du chargement du tableau de bord ambassadeur.' });
     }
   });
 
@@ -452,6 +519,65 @@ export async function createPigaApp(options: CreateAppOptions = {}): Promise<Exp
     }
   });
 
+  // 5c. Push (W3C Web Push / VAPID): clé publique servie au navigateur
+  app.get('/api/push/public-key', (req: Request, res: Response) => {
+    return res.json({ enabled: isPushEnabled(), publicKey: getVapidPublicKey() });
+  });
+
+  // 5d. Push: enregistrement d'un terminal (Direction via session, Ambassadeur via code vérifié)
+  app.post('/api/push/subscribe', async (req: Request, res: Response) => {
+    try {
+      const { endpoint, keys, audience = 'AMBASSADOR', ambassadorCode } = req.body || {};
+      if (!endpoint || !keys?.p256dh || !keys?.auth) {
+        return res.status(400).json({ success: false, message: 'Abonnement push invalide.' });
+      }
+
+      const userAgent = req.headers['user-agent'] || 'Unknown-Client';
+
+      if (audience === 'ADMIN') {
+        // La Direction doit présenter une session zéro-trust valide
+        const header = req.headers['authorization'] || '';
+        const bearer = header.startsWith('Bearer ') ? header.slice(7) : '';
+        const token = bearer || (req.headers['x-admin-token'] as string) || '';
+        const { validateAdminSession } = await import('./neonStore.ts');
+        if (!(await validateAdminSession(token))) {
+          return res.status(401).json({ success: false, message: 'Session administrateur requise pour inscrire un terminal Direction.' });
+        }
+        await store.savePushSubscription({
+          audience: 'ADMIN', adminId: 'ADM-2026-CHIEF', endpoint,
+          p256dh: String(keys.p256dh), auth: String(keys.auth), userAgent
+        });
+        return res.status(201).json({ success: true, audience: 'ADMIN' });
+      }
+
+      // Ambassadeur : le code doit exister et être actif
+      const ambassador = await store.getAmbassadorByCode(String(ambassadorCode || ''));
+      if (!ambassador || ambassador.status !== 'ACTIVE') {
+        return res.status(404).json({ success: false, message: 'Code ambassadeur invalide ou suspendu.' });
+      }
+      await store.savePushSubscription({
+        audience: 'AMBASSADOR', ambassadorId: ambassador.id, endpoint,
+        p256dh: String(keys.p256dh), auth: String(keys.auth), userAgent
+      });
+      return res.status(201).json({ success: true, audience: 'AMBASSADOR' });
+    } catch (err) {
+      console.error('[PUSH SUBSCRIBE ERROR]:', err);
+      return res.status(500).json({ success: false, message: 'Échec de l\'enregistrement push.' });
+    }
+  });
+
+  // 5e. Push: désinscription d'un terminal
+  app.post('/api/push/unsubscribe', async (req: Request, res: Response) => {
+    try {
+      const { endpoint } = req.body || {};
+      if (endpoint) await store.deletePushSubscription(String(endpoint));
+      return res.json({ success: true });
+    } catch (err) {
+      console.error('[PUSH UNSUBSCRIBE ERROR]:', err);
+      return res.status(500).json({ success: false, message: 'Échec de la désinscription push.' });
+    }
+  });
+
   // 6. Admin Authentication (Owner-only: env-driven identity)
   app.post('/api/admin/auth', async (req: Request, res: Response) => {
     const { email, password } = req.body || {};
@@ -527,6 +653,11 @@ export async function createPigaApp(options: CreateAppOptions = {}): Promise<Exp
       const userAgent = req.headers['user-agent'] || 'Unknown-Client';
 
       const updated = await store.confirmPayment(participantId, adminId, clientIp, userAgent);
+
+      // Push temps réel : alerte l'ambassadeur parrain que sa vente est validée
+      // (la commission reste en délai de traitement de 48h avant versement).
+      void notifyAmbassadorSale(store, updated);
+
       return res.json({ success: true, participant: updated });
     } catch (err) {
       console.error('[CONFIRM PAYMENT ERROR]:', err);
@@ -602,6 +733,88 @@ export async function createPigaApp(options: CreateAppOptions = {}): Promise<Exp
     } catch (err) {
       console.error('[RESET WORKSHOP ERROR]:', err);
       return res.status(500).json({ success: false, message: 'Échec du nettoyage de la console. Réessayez.' });
+    }
+  });
+
+  // 11c. Admin: registre des ambassadeurs avec statistiques (classement Top Ambassadeur)
+  app.get('/api/admin/ambassadors', async (req: Request, res: Response) => {
+    res.json(await store.listAmbassadorsWithStats());
+  });
+
+  // 11d. Admin: création manuelle d'un ambassadeur (Direction)
+  app.post('/api/admin/ambassadors', async (req: Request, res: Response) => {
+    try {
+      const { fullName, email, phone, commissionRate, termsAccepted, adminId = 'ADM-2026-CHIEF' } = req.body || {};
+      const clientIp = safelyGetClientIp(req);
+      const userAgent = req.headers['user-agent'] || 'Unknown-Client';
+
+      const result = await store.createAmbassador(
+        { fullName, email, phone, commissionRate, termsAccepted },
+        String(adminId),
+        clientIp,
+        userAgent,
+        { skipRateLimit: true }
+      );
+      return res.status(201).json({ success: true, ...result });
+    } catch (err: unknown) {
+      console.error('[ADMIN AMBASSADOR CREATE ERROR]:', err);
+      const errMessage = err instanceof Error ? err.message : '';
+      let message = 'Échec de création de l\'ambassadeur.';
+      if (errMessage.includes('DRC_PHONE_INVALID')) message = errMessage.replace('DRC_PHONE_INVALID: ', '');
+      else if (errMessage.includes('EMAIL_INVALID')) message = 'Adresse e-mail invalide.';
+      else if (errMessage.includes('NAME_INVALID')) message = 'Nom complet requis.';
+      else if (errMessage.includes('AMBASSADOR_CODE_EXHAUSTED')) message = 'Génération de code impossible. Réessayez.';
+      return res.status(400).json({ success: false, message });
+    }
+  });
+
+  // 11e. Admin: détail des ventes rattachées à un ambassadeur
+  app.get('/api/admin/ambassadors/:id/sales', async (req: Request, res: Response) => {
+    try {
+      const sales = await store.listAmbassadorSales(String(req.params.id));
+      return res.json(sales);
+    } catch (err) {
+      console.error('[ADMIN AMBASSADOR SALES ERROR]:', err);
+      return res.status(500).json({ success: false, message: 'Échec du chargement des ventes.' });
+    }
+  });
+
+  // 11f. Admin: verser les commissions gagnées d'un ambassadeur (bouton « Payé »)
+  app.post('/api/admin/ambassadors/:id/pay', async (req: Request, res: Response) => {
+    try {
+      const { adminId = 'ADM-2026-CHIEF' } = req.body || {};
+      const clientIp = safelyGetClientIp(req);
+      const userAgent = req.headers['user-agent'] || 'Unknown-Client';
+
+      const result = await store.markAmbassadorCommissionsPaid(String(req.params.id), String(adminId), clientIp, userAgent);
+      return res.json({ success: true, ...result });
+    } catch (err) {
+      console.error('[ADMIN AMBASSADOR PAYOUT ERROR]:', err);
+      return res.status(500).json({ success: false, message: 'Échec du versement des commissions.' });
+    }
+  });
+
+  // 11g. Admin: suspendre / réactiver un ambassadeur
+  app.post('/api/admin/ambassadors/:id/status', async (req: Request, res: Response) => {
+    try {
+      const { active, adminId = 'ADM-2026-CHIEF' } = req.body || {};
+      const clientIp = safelyGetClientIp(req);
+      const userAgent = req.headers['user-agent'] || 'Unknown-Client';
+
+      const ambassador = await store.setAmbassadorStatus(
+        String(req.params.id),
+        active ? 'ACTIVE' : 'SUSPENDED',
+        String(adminId),
+        clientIp,
+        userAgent
+      );
+      if (!ambassador) {
+        return res.status(404).json({ success: false, message: 'Ambassadeur introuvable.' });
+      }
+      return res.json({ success: true, ambassador });
+    } catch (err) {
+      console.error('[ADMIN AMBASSADOR STATUS ERROR]:', err);
+      return res.status(500).json({ success: false, message: 'Échec de la mise à jour du statut.' });
     }
   });
 

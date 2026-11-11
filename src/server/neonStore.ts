@@ -22,7 +22,13 @@ import type {
   ProgramConfig,
   AdminStats,
   FormationSummary,
-  FormationSalesSummary
+  FormationSalesSummary,
+  Ambassador,
+  AmbassadorStatus,
+  CommissionStatus,
+  AmbassadorSummary,
+  AmbassadorPortalView,
+  AmbassadorSalesEntry
 } from '../types/index.ts';
 import {
   DEFAULT_PROGRAM_CONFIG,
@@ -107,13 +113,32 @@ function rowToParticipant(row: AnyRow): Participant {
     confirmedAt: isoOrNull(row.confirmed_at),
     adminNotes: (row.admin_notes as string | null) ?? undefined,
     revokedAt: isoOrNull(row.revoked_at),
-    revocationReason: (row.revocation_reason as string | null) ?? undefined
+    revocationReason: (row.revocation_reason as string | null) ?? undefined,
+    ambassadorCode: (row.ambassador_code as string | null) ?? undefined,
+    commissionUsd: row.commission_usd !== null && row.commission_usd !== undefined ? Number(row.commission_usd) : undefined,
+    commissionStatus: (row.commission_status as Participant['commissionStatus']) ?? undefined
   };
 }
 
 function rowToConfig(raw: unknown): ProgramConfig {
   const cfg = raw as Partial<ProgramConfig>;
   return { ...DEFAULT_PROGRAM_CONFIG, ...cfg } as ProgramConfig;
+}
+
+function rowToAmbassador(row: AnyRow): Ambassador {
+  return {
+    id: String(row.id),
+    code: String(row.code),
+    fullName: String(row.full_name),
+    email: String(row.email),
+    phoneInternational: String(row.phone_international),
+    commissionRate: Number(row.commission_rate),
+    payoutProvider: String(row.payout_provider ?? 'ORANGE_MONEY'),
+    payoutNumber: (row.payout_number as string | null) ?? undefined,
+    status: String(row.status) as AmbassadorStatus,
+    createdAt: isoOrNull(row.created_at) ?? new Date().toISOString(),
+    commissionTermsAcceptedAt: isoOrNull(row.commission_terms_accepted_at)
+  };
 }
 
 // ============================================================================
@@ -558,6 +583,20 @@ export class NeonStore {
       const randomSuffix = crypto.randomBytes(3).toString('hex').toUpperCase();
       const ticketCode = `AA-2026-${randomSuffix}-${phoneIntl.slice(-3)}`;
 
+      // 5b. Attribution ambassadeur (lien magique ?ref=AMB-XXXX) — si le code est
+      // actif, l'inscription est étiquetée et la commission figée (snapshot).
+      let ambassadorRow: { id: string; code: string; commission_rate: string } | undefined;
+      if (req.ref && typeof req.ref === 'string') {
+        const ambResult = await client.query(
+          `SELECT id, code, commission_rate FROM public.ambassadors
+           WHERE upper(code) = $1 AND status = 'ACTIVE'
+           LIMIT 1`,
+          [req.ref.trim().toUpperCase()]
+        );
+        ambassadorRow = ambResult.rows[0] as { id: string; code: string; commission_rate: string } | undefined;
+      }
+      const commissionUsd = ambassadorRow ? Math.round(cfg.ticketPriceUsd * Number(ambassadorRow.commission_rate) * 100) / 100 : null;
+
       // 6. Preuve de paiement Orange Money (persistée dans la même transaction).
       // req.proofBase64 peut arriver sous forme de data-URL complète
       // ("data:image/jpeg;base64,....") : décoder le préfixe en base64 brouille
@@ -585,9 +624,11 @@ export class NeonStore {
           full_name, email, email_masked, phone_raw, phone_international, phone_masked,
           network_carrier, status, price_usd, program_id, payment_provider,
           transaction_reference, proof_file_name, proof_storage_path,
-          nda_accepted, nda_accepted_at, created_at, ticket_code
-         ) VALUES ($1,$2,$3,$4,$5,$6,$7,'PENDING',$8,$9,$10,$11,$12,$13,true,now(),now(),$14)
-         RETURNING *`,
+          nda_accepted, nda_accepted_at, created_at, ticket_code,
+          ambassador_code, ambassador_id, commission_usd, commission_status
+         ) VALUES (
+          $1,$2,$3,$4,$5,$6,$7,'PENDING',$8,$9,$10,$11,$12,$13,true,now(),now(),$14,$15,$16,$17,$18
+         ) RETURNING *`,
         [
           req.fullName.trim(),
           email,
@@ -602,7 +643,11 @@ export class NeonStore {
           req.transactionReference ? req.transactionReference.trim() : 'N/A',
           req.proofFileName || 'screenshot_orange_money.jpg',
           proofStoragePath,
-          ticketCode
+          ticketCode,
+          ambassadorRow?.code ?? null,
+          ambassadorRow?.id ?? null,
+          commissionUsd,
+          ambassadorRow ? 'PENDING' : null
         ]
       );
       const participant = rowToParticipant(inserted.rows[0]);
@@ -660,6 +705,14 @@ export class NeonStore {
       );
       const result = rowToParticipant(updated.rows[0]);
 
+      // Vente VALIDÉE : la commission de l'ambassadeur parrain est désormais gagnée
+      if (result.ambassadorCode) {
+        await client.query(
+          `UPDATE public.participants SET commission_status = 'EARNED' WHERE id = $1 AND ambassador_id IS NOT NULL`,
+          [participantId]
+        );
+      }
+
       await client.query(
         `INSERT INTO public.audit_logs (id, admin_id, action_type, participant_id, timestamp, user_agent, ip_address, metadata)
          VALUES ($1, $2, 'CONFIRM_PAYMENT', $3, now(), $4, $5, $6::jsonb)`,
@@ -690,6 +743,12 @@ export class NeonStore {
     if (!updated.rows[0]) throw new Error('PARTICIPANT_NOT_FOUND');
     const participant = rowToParticipant(updated.rows[0]);
 
+    // Dossier rejeté : commission annulée (zéro litige)
+    await this.db.query(
+      `UPDATE public.participants SET commission_status = 'CANCELLED' WHERE id = $1 AND ambassador_id IS NOT NULL AND commission_status IN ('PENDING','EARNED')`,
+      [participantId]
+    );
+
     await this.addAuditLog({
       id: crypto.randomUUID(),
       adminId,
@@ -713,6 +772,12 @@ export class NeonStore {
     );
     if (!updated.rows[0]) throw new Error('PARTICIPANT_NOT_FOUND');
     const participant = rowToParticipant(updated.rows[0]);
+
+    // Réservation révoquée : commission annulée (zéro litige)
+    await this.db.query(
+      `UPDATE public.participants SET commission_status = 'CANCELLED' WHERE id = $1 AND ambassador_id IS NOT NULL AND commission_status IN ('PENDING','EARNED')`,
+      [participantId]
+    );
 
     await this.addAuditLog({
       id: crypto.randomUUID(),
@@ -1097,5 +1162,367 @@ export class NeonStore {
     } finally {
       client.release();
     }
+  }
+
+  // --------------------------------------------------------------------------
+  // AMBASSADEURS PIGA STUDIO (affiliation, tracking, commissions 15%)
+  // --------------------------------------------------------------------------
+  private static readonly AMBASSADOR_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'; // sans I/L/O/0/1
+
+  private async generateUniqueAmbassadorCode(): Promise<string> {
+    for (let attempt = 0; attempt < 8; attempt++) {
+      let suffix = '';
+      const bytes = crypto.randomBytes(4);
+      for (let i = 0; i < 4; i++) {
+        suffix += NeonStore.AMBASSADOR_ALPHABET[bytes[i] % NeonStore.AMBASSADOR_ALPHABET.length];
+      }
+      const code = `AMB-${suffix}`;
+      const exists = await this.db.query('SELECT 1 FROM public.ambassadors WHERE upper(code) = $1 LIMIT 1', [code]);
+      if (exists.rows.length === 0) return code;
+    }
+    throw new Error('AMBASSADOR_CODE_EXHAUSTED: Impossible de générer un code unique.');
+  }
+
+  /** Création par la Direction (console) ou le portail de recrutement */
+  async createAmbassador(
+    input: { fullName: string; email: string; phone: string; commissionRate?: number; termsAccepted?: boolean },
+    createdBy: string,
+    clientIp: string,
+    userAgent: string,
+    options: { skipRateLimit?: boolean } = {}
+  ): Promise<{ ambassador: Ambassador; alreadyRegistered: boolean }> {
+    // Condition d'acceptation OBLIGATOIRE : la commission n'est versée qu'après
+    // confirmation du paiement Orange Money de l'affilié + délai de 48h.
+    if (!input.termsAccepted) {
+      throw new Error('TERMS_REQUIRED: Vous devez accepter les conditions de commission (versement après confirmation du paiement + délai de traitement de 48 heures).');
+    }
+
+    const phoneValidation = cleanAndValidateDRCPhone(input.phone);
+    if (!phoneValidation.isValid) {
+      throw new Error(`DRC_PHONE_INVALID: ${phoneValidation.errorMessage}`);
+    }
+    const email = String(input.email || '').trim().toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      throw new Error('EMAIL_INVALID: Adresse email invalide.');
+    }
+    const fullName = String(input.fullName || '').trim();
+    if (fullName.length < 3) {
+      throw new Error('NAME_INVALID: Nom complet requis (3 caractères minimum).');
+    }
+    const phoneIntl = phoneValidation.formattedInternational;
+
+    // Anti-abus : max 5 créations par IP / 24h (recrutement public)
+    if (!options.skipRateLimit) {
+      const rate = await this.db.query(
+        `SELECT count(*)::int AS n FROM public.ambassadors
+         WHERE created_from_ip = $1 AND created_at > now() - interval '24 hours'`,
+        [clientIp]
+      );
+      if (rate.rows[0].n >= 5) {
+        throw new Error('AMBASSADOR_RATE_LIMITED: Trop de candidatures depuis cet appareil. Contactez la Direction.');
+      }
+    }
+
+    // Idempotent : un numéro actif = un ambassadeur (renvoi du même code)
+    const existing = await this.db.query(
+      `SELECT * FROM public.ambassadors WHERE phone_international = $1 AND status = 'ACTIVE' LIMIT 1`,
+      [phoneIntl]
+    );
+    if (existing.rows[0]) {
+      return { ambassador: rowToAmbassador(existing.rows[0]), alreadyRegistered: true };
+    }
+
+    const rate = input.commissionRate && input.commissionRate > 0 && input.commissionRate <= 1
+      ? input.commissionRate
+      : 0.15;
+
+    const client = await this.db.connect();
+    try {
+      await client.query('BEGIN');
+      // Un numéro ne correspond qu'à UN ambassadeur actif (index unique partiel)
+      const clash = await client.query(
+        `SELECT 1 FROM public.ambassadors WHERE phone_international = $1 AND status = 'ACTIVE' FOR UPDATE`,
+        [phoneIntl]
+      );
+      if (clash.rows[0]) {
+        await client.query('ROLLBACK');
+        return { ambassador: rowToAmbassador(clash.rows[0]), alreadyRegistered: true };
+      }
+
+      const code = await this.generateUniqueAmbassadorCode();
+      const inserted = await client.query(
+        `INSERT INTO public.ambassadors (code, full_name, email, phone_international, commission_rate, commission_terms_accepted_at, created_from_ip, created_by)
+         VALUES ($1, $2, $3, $4, $5, now(), $6, $7) RETURNING *`,
+        [code, fullName, email, phoneIntl, rate, clientIp, createdBy]
+      );
+      const ambassador = rowToAmbassador(inserted.rows[0]);
+
+      await client.query(
+        `INSERT INTO public.audit_logs (id, admin_id, action_type, timestamp, user_agent, ip_address, metadata)
+         VALUES ($1, $2, 'AMBASSADOR_CREATE', now(), $3, $4, $5::jsonb)`,
+        [
+          crypto.randomUUID(), createdBy, userAgent, clientIp,
+          JSON.stringify({ code: ambassador.code, fullName: ambassador.fullName, commissionRate: ambassador.commissionRate })
+        ]
+      );
+
+      await client.query('COMMIT');
+      return { ambassador, alreadyRegistered: false };
+    } catch (err) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw err;
+    } finally {
+      client.release();
+    }
+  }
+
+  async getAmbassadorByCode(code: string): Promise<Ambassador | undefined> {
+    const result = await this.db.query('SELECT * FROM public.ambassadors WHERE upper(code) = $1 LIMIT 1', [code.trim().toUpperCase()]);
+    return result.rows[0] ? rowToAmbassador(result.rows[0]) : undefined;
+  }
+
+  /** Ping de clic dédupliqué : 1 clic par ambassadeur + jour + IP */
+  async recordAmbassadorClick(code: string, ipHash: string, userAgent: string): Promise<boolean> {
+    const ambassador = await this.getAmbassadorByCode(code);
+    if (!ambassador || ambassador.status !== 'ACTIVE') return false;
+    const inserted = await this.db.query(
+      `INSERT INTO public.ambassador_clicks (ambassador_id, ip_hash, user_agent)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (ambassador_id, click_day, ip_hash) DO NOTHING`,
+      [ambassador.id, ipHash, userAgent.slice(0, 250)]
+    );
+    return (inserted.rowCount ?? 0) > 0;
+  }
+
+  /** Statistiques agrégées partagées portail public / console Direction.
+   *  Règle de rémunération : la commission n'est PAYABLE qu'après
+   *  confirmation du paiement Orange Money + 48h de traitement. */
+  private static readonly AMBASSADOR_STATS_SQL = `
+    (SELECT count(*)::int FROM public.ambassador_clicks c WHERE c.ambassador_id = a.id) AS clicks,
+    count(p.id) FILTER (WHERE p.status = 'CONFIRMED')::int AS validated_sales,
+    count(p.id) FILTER (WHERE p.status = 'PENDING')::int AS pending_sales,
+    COALESCE(sum(p.commission_usd) FILTER (WHERE p.status = 'CONFIRMED'), 0)::float AS earned_usd,
+    COALESCE(sum(p.commission_usd) FILTER (WHERE p.status = 'PENDING'), 0)::float AS pending_usd,
+    COALESCE(sum(p.commission_usd) FILTER (WHERE p.status = 'CONFIRMED' AND p.commission_status = 'PAID'), 0)::float AS paid_usd,
+    COALESCE(sum(p.commission_usd) FILTER (WHERE p.status = 'CONFIRMED' AND p.commission_status = 'EARNED' AND p.confirmed_at <= now() - interval '48 hours'), 0)::float AS to_pay_usd,
+    COALESCE(sum(p.commission_usd) FILTER (WHERE p.status = 'CONFIRMED' AND p.commission_status = 'EARNED' AND p.confirmed_at > now() - interval '48 hours'), 0)::float AS in_hold_usd`;
+
+  private statsRowToSummary(row: AnyRow, ambassador: Ambassador): AmbassadorSummary {
+    const clicks = Number(row.clicks ?? 0);
+    const validatedSales = Number(row.validated_sales ?? 0);
+    return {
+      ...ambassador,
+      clicks,
+      validatedSales,
+      pendingSales: Number(row.pending_sales ?? 0),
+      earnedUsd: Number(row.earned_usd ?? 0),
+      pendingUsd: Number(row.pending_usd ?? 0),
+      inHoldUsd: Number(row.in_hold_usd ?? 0),
+      paidUsd: Number(row.paid_usd ?? 0),
+      toPayUsd: Number(row.to_pay_usd ?? 0),
+      conversionRate: clicks > 0 ? Math.round((validatedSales / clicks) * 1000) / 10 : 0
+    };
+  }
+
+  /** Vue du portail ambassadeur via lien magique (stats + formation active) */
+  async getAmbassadorPortalView(code: string): Promise<AmbassadorPortalView | undefined> {
+    const ambassador = await this.getAmbassadorByCode(code);
+    if (!ambassador) return undefined;
+
+    const statsResult = await this.db.query(
+      `SELECT a.id, a.code, a.status, a.commission_rate, ${NeonStore.AMBASSADOR_STATS_SQL}
+       FROM public.ambassadors a
+       LEFT JOIN public.participants p ON p.ambassador_id = a.id
+       WHERE a.id = $1
+       GROUP BY a.id, a.code, a.status, a.commission_rate`,
+      [ambassador.id]
+    );
+    const row = statsResult.rows[0] as AnyRow | undefined;
+    if (!row) return undefined;
+
+    const cfg = await this.getProgramConfig();
+    return {
+      ambassador: {
+        code: ambassador.code,
+        fullName: ambassador.fullName,
+        status: ambassador.status,
+        commissionRate: Number(row.commission_rate ?? ambassador.commissionRate),
+        commissionPerSaleUsd: Math.round(Number(row.commission_rate ?? ambassador.commissionRate) * cfg.ticketPriceUsd * 100) / 100
+      },
+      stats: {
+        clicks: Number(row.clicks ?? 0),
+        validatedSales: Number(row.validated_sales ?? 0),
+        pendingSales: Number(row.pending_sales ?? 0),
+        earnedUsd: Number(row.earned_usd ?? 0),
+        pendingUsd: Number(row.pending_usd ?? 0),
+        inHoldUsd: Number(row.in_hold_usd ?? 0)
+      },
+      paidUsd: Number(row.paid_usd ?? 0),
+      toPayUsd: Number(row.to_pay_usd ?? 0),
+      formation: {
+        title: cfg.title,
+        dateDisplay: cfg.dateDisplay,
+        ticketPriceUsd: cfg.ticketPriceUsd,
+        totalCapacity: cfg.totalCapacity,
+        heroImageUrl: cfg.heroImageUrl
+      }
+    };
+  }
+
+  /** Classement complet pour la console Direction (top ambassadeur) */
+  async listAmbassadorsWithStats(): Promise<AmbassadorSummary[]> {
+    const result = await this.db.query(
+      `SELECT a.*, ${NeonStore.AMBASSADOR_STATS_SQL}
+       FROM public.ambassadors a
+       LEFT JOIN public.participants p ON p.ambassador_id = a.id
+       GROUP BY a.id
+       ORDER BY earned_usd DESC, created_at ASC`
+    );
+    return result.rows.map((row: AnyRow) => this.statsRowToSummary(row, rowToAmbassador(row)));
+  }
+
+  /** Détail des ventes rattachées à un ambassadeur (traçabilité, zéro litige) */
+  async listAmbassadorSales(ambassadorId: string): Promise<AmbassadorSalesEntry[]> {
+    const result = await this.db.query(
+      `SELECT id, full_name, ticket_code, status, price_usd, commission_usd, commission_status, commission_paid_at, created_at
+       FROM public.participants
+       WHERE ambassador_id = $1
+       ORDER BY created_at DESC
+       LIMIT 100`,
+      [ambassadorId]
+    );
+    return result.rows.map((row: AnyRow) => ({
+      participantId: String(row.id),
+      fullName: String(row.full_name),
+      ticketCode: (row.ticket_code as string | null) ?? undefined,
+      status: String(row.status) as AmbassadorSalesEntry['status'],
+      priceUsd: Number(row.price_usd),
+      commissionUsd: Number(row.commission_usd ?? 0),
+      commissionStatus: (row.commission_status as CommissionStatus) ?? undefined,
+      commissionPaidAt: isoOrNull(row.commission_paid_at),
+      createdAt: isoOrNull(row.created_at) ?? ''
+    }));
+  }
+
+  /** Paie des commissions gagnées HORS délai de traitement (48h après le
+   *  paiement confirmé de l'affilié). Les commissions encore en délai de
+   *  traitement ne sont jamais versées, même si la Direction appuie « Payé ». */
+  async markAmbassadorCommissionsPaid(ambassadorId: string, adminId: string, clientIp: string, userAgent: string): Promise<{ marked: number; totalUsd: number; skippedInHold: number }> {
+    // Commissions mûres : EARNED + confirmées depuis >= 48h
+    const updated = await this.db.query(
+      `UPDATE public.participants
+       SET commission_status = 'PAID', commission_paid_at = now()
+       WHERE ambassador_id = $1 AND commission_status = 'EARNED'
+         AND confirmed_at IS NOT NULL
+         AND confirmed_at <= now() - interval '48 hours'
+       RETURNING commission_usd`,
+      [ambassadorId]
+    );
+    const marked = updated.rows.length;
+    const totalUsd = updated.rows.reduce((s: number, r: AnyRow) => s + Number(r.commission_usd ?? 0), 0);
+
+    // Commissions volontairement laissées en délai de traitement
+    const holdResult = await this.db.query<{ n: number }>(
+      `SELECT count(*)::int AS n FROM public.participants
+       WHERE ambassador_id = $1 AND commission_status = 'EARNED'
+         AND confirmed_at IS NOT NULL
+         AND confirmed_at > now() - interval '48 hours'`,
+      [ambassadorId]
+    );
+    const skippedInHold = holdResult.rows[0]?.n ?? 0;
+
+    const ambassador = await this.db.query('SELECT code, full_name FROM public.ambassadors WHERE id = $1', [ambassadorId]);
+    await this.addAuditLog({
+      id: crypto.randomUUID(),
+      adminId,
+      actionType: 'AMBASSADOR_PAYOUT',
+      timestamp: new Date().toISOString(),
+      userAgent,
+      ipAddress: clientIp,
+      details: {
+        ambassadorCode: ambassador.rows[0]?.code ?? ambassadorId,
+        ambassadorName: ambassador.rows[0]?.full_name ?? '',
+        markedCommissions: marked,
+        totalUsd: Math.round(totalUsd * 100) / 100,
+        skippedInHold,
+        note: 'Commissions Orange Money versées et marquées payées (hors délai de traitement 48h)'
+      }
+    });
+    return { marked, totalUsd: Math.round(totalUsd * 100) / 100, skippedInHold };
+  }
+
+  /** Suspension / réactivation d'un ambassadeur (les liens actifs tombent) */
+  async setAmbassadorStatus(ambassadorId: string, status: AmbassadorStatus, adminId: string, clientIp: string, userAgent: string): Promise<Ambassador | undefined> {
+    const updated = await this.db.query(
+      `UPDATE public.ambassadors SET status = $2 WHERE id = $1 RETURNING *`,
+      [ambassadorId, status]
+    );
+    if (!updated.rows[0]) return undefined;
+    const ambassador = rowToAmbassador(updated.rows[0]);
+
+    await this.addAuditLog({
+      id: crypto.randomUUID(),
+      adminId,
+      actionType: 'AMBASSADOR_SUSPEND',
+      timestamp: new Date().toISOString(),
+      userAgent,
+      ipAddress: clientIp,
+      details: { code: ambassador.code, fullName: ambassador.fullName, newStatus: status }
+    });
+    return ambassador;
+  }
+
+  // --------------------------------------------------------------------------
+  // NOTIFICATIONS PUSH SERVEUR (W3C Web Push / VAPID)
+  // --------------------------------------------------------------------------
+  /** Enregistre (ou met à jour) un abonnement push navigateur */
+  async savePushSubscription(input: {
+    audience: 'ADMIN' | 'AMBASSADOR';
+    ambassadorId?: string | null;
+    adminId?: string | null;
+    endpoint: string;
+    p256dh: string;
+    auth: string;
+    userAgent?: string;
+  }): Promise<void> {
+    await this.db.query(
+      `INSERT INTO public.push_subscriptions (audience, ambassador_id, admin_id, endpoint, p256dh, auth, user_agent)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
+       ON CONFLICT (endpoint) DO UPDATE SET
+         audience = $1, ambassador_id = $2, admin_id = $3,
+         p256dh = $5, auth = $6, user_agent = $7`,
+      [
+        input.audience,
+        input.ambassadorId ?? null,
+        input.adminId ?? null,
+        input.endpoint,
+        input.p256dh,
+        input.auth,
+        (input.userAgent || '').slice(0, 250)
+      ]
+    );
+  }
+
+  /** Supprime un abonnement (désinscription navigateur ou terminal mort) */
+  async deletePushSubscription(endpoint: string): Promise<void> {
+    await this.db.query('DELETE FROM public.push_subscriptions WHERE endpoint = $1', [endpoint]);
+  }
+
+  /** Récupère les abonnements cibles : Direction ou un ambassadeur précis */
+  async getPushSubscriptions(audience: 'ADMIN' | 'AMBASSADOR', ambassadorId?: string): Promise<Array<{ endpoint: string; p256dh: string; auth: string }>> {
+    const result = ambassadorId
+      ? await this.db.query(
+          `SELECT endpoint, p256dh, auth FROM public.push_subscriptions WHERE audience = 'AMBASSADOR' AND ambassador_id = $1`,
+          [ambassadorId]
+        )
+      : await this.db.query(
+          `SELECT endpoint, p256dh, auth FROM public.push_subscriptions WHERE audience = $1`,
+          [audience]
+        );
+    return result.rows.map((r: AnyRow) => ({
+      endpoint: String(r.endpoint),
+      p256dh: String(r.p256dh),
+      auth: String(r.auth)
+    }));
   }
 }
