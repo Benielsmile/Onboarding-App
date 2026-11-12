@@ -1,5 +1,14 @@
 # PIGA STUDIO — Arsenal Agentique 2026
 
+[![License: MIT](https://shields.io)](https://opensource.org)
+[![PRs Welcome](https://shields.io)](https://github.com)
+[![Made in Africa](https://shields.io🇨🇩-blue.svg)](https://github.com)
+[![React 19](https://shields.io)](https://react.dev)
+
+
+
+
+
 Application full-stack d'**onboarding & billetterie cryptographique** pour les
 Masterclass PIGA STUDIO : page de vente dynamique, inscription à l'Orange Money,
 vérification manuelle des paiements par la Direction, billets signés AES-256-GCM,
@@ -161,3 +170,24 @@ multi-instance-ready.
 💬 WhatsApp Direction : +243 997 406 281 (https://wa.me/243997406281) — **canal officiel de toute manipulation WhatsApp**
 ☎️ Orange Money : +243 803 240 289 — **strictement réservé à l'encaissement des paiements (non négociable)**
 📧 Direction : voir `.env` (`ADMIN_EMAIL`)
+
+
+
+## 🤝 Open-Source & Contribution
+
+Ce projet est **100 % open-source** sous licence **MIT**. Vous êtes libre de le **forker**, le **cloner**, le modifier et le déployer pour vos propres communautés, bootcamps ou systèmes d'onboarding.
+
+### Comment contribuer :
+1. **Forkez** le dépôt depuis le bouton en haut à droite de GitHub.
+2. **Clonez** votre fork en local :
+   ```bash
+   git clone https://github.com
+   ```
+3. **Créez une branche** pour votre fonctionnalité (`git checkout -b feature/nouvelle-fonctionnalite`).
+4. **Committez** vos changements (`git commit -m "Ajout d'une nouvelle fonctionnalité"`).
+5. **Poussez** sur votre branche (`git push origin feature/nouvelle-fonctionnalite`) et ouvrez une **Pull Request**.
+
+## 📄 Licence
+
+Distribué sous la licence **MIT**. Voir le fichier [`LICENSE`](./LICENSE) pour plus d'informations.
+
